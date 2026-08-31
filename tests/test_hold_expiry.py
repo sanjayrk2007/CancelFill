@@ -1,0 +1,43 @@
+from datetime import datetime, timezone, timedelta
+from app.models import Hold, HoldStatus, Slot, SlotStatus
+
+def test_timestamp_hold_expiry(client, db):
+    now = datetime.now(timezone.utc)
+
+    # 1. Create slot
+    slot = Slot(
+        id="expiry-slot-1",
+        resource_id="expiry_resource",
+        start_time=now + timedelta(hours=1),
+        end_time=now + timedelta(hours=2),
+        status=SlotStatus.HELD.value
+    )
+    db.add(slot)
+    db.commit()
+
+    # 2. Create hold that expired 5 minutes ago
+    past_expires_at = now - timedelta(minutes=5)
+    expired_hold = Hold(
+        id="hold-past-1",
+        slot_id=slot.id,
+        user_id="customer_alice",
+        created_at=now - timedelta(minutes=20),
+        expires_at=past_expires_at,
+        status=HoldStatus.ACTIVE.value
+    )
+    db.add(expired_hold)
+    db.commit()
+
+    # 3. Call check-expiry endpoint
+    res = client.post(f"/api/v1/holds/{expired_hold.id}/check-expiry")
+    assert res.status_code == 200
+    data = res.json()
+
+    assert data["hold_id"] == expired_hold.id
+    assert data["is_expired"] is True
+    assert data["status"] == "EXPIRED"
+    assert data["slot_status"] == "AVAILABLE"
+
+    # Verify DB state
+    db.refresh(slot)
+    assert slot.status == "AVAILABLE"
