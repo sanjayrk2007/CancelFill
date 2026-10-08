@@ -1,10 +1,12 @@
 from datetime import datetime, timezone, timedelta
 from typing import Dict
 from fastapi.testclient import TestClient
-from app.models import User
+from sqlalchemy.orm import Session
+from app.models import Slot, User
 
 def test_cancellation_candidate_selection_flow(
     client: TestClient,
+    db: Session,
     customer_user: User,
     business_auth_headers: Dict[str, str],
     customer_auth_headers: Dict[str, str],
@@ -83,8 +85,8 @@ def test_cancellation_candidate_selection_flow(
     assert data["hold"]["user_id"] == customer_user.id
     assert data["hold"]["status"] == "ACTIVE"
 
-    slot_check = client.get(f"/api/v1/slots/{slot_id}")
-    assert slot_check.json()["status"] == "HELD"
+    slot = db.query(Slot).filter(Slot.id == slot_id).one()
+    assert slot.status == "HELD"
 
 def test_slot_owner_can_cancel_booking(
     client: TestClient,

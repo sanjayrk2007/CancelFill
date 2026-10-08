@@ -1,6 +1,4 @@
-from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import require_customer
@@ -26,7 +24,3 @@ def create_booking(
             status_code=status.HTTP_409_CONFLICT,
             detail="This offer is no longer available"
         )
-
-@router.get("", response_model=List[BookingResponse], summary="List all bookings")
-def list_bookings(db: Session = Depends(get_db)) -> List[Booking]:
-    return list(db.scalars(select(Booking)).all())

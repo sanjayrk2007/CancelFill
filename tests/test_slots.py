@@ -1,8 +1,10 @@
 from datetime import datetime, timezone, timedelta
 from typing import Dict
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+from app.models import Slot
 
-def test_create_and_get_slot(client: TestClient, business_auth_headers: Dict[str, str]) -> None:
+def test_create_and_get_slot(client: TestClient, db: Session, business_auth_headers: Dict[str, str]) -> None:
     now = datetime.now(timezone.utc)
     start_time = (now + timedelta(hours=1)).isoformat()
     end_time = (now + timedelta(hours=2)).isoformat()
@@ -31,9 +33,8 @@ def test_create_and_get_slot(client: TestClient, business_auth_headers: Dict[str
     assert len(slots) == 1
     assert slots[0]["id"] == slot_id
 
-    detail_response = client.get(f"/api/v1/slots/{slot_id}")
-    assert detail_response.status_code == 200
-    assert detail_response.json()["id"] == slot_id
+    slot = db.query(Slot).filter(Slot.id == slot_id).one()
+    assert slot.id == slot_id
 
 def test_create_slot_naive_datetime(client: TestClient, business_auth_headers: Dict[str, str]) -> None:
     response = client.post(

@@ -1,11 +1,10 @@
-from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import require_customer
 from app.models import User, WaitlistEntry
 from app.schemas import WaitlistCreate, WaitlistResponse
-from app.services.allocation_service import join_waitlist, leave_waitlist, get_waitlist_for_slot
+from app.services.allocation_service import join_waitlist, leave_waitlist
 from app.services.state_machine import NotFoundError, InvalidTransition
 
 router = APIRouter(tags=["Waitlist"])
@@ -42,13 +41,3 @@ def cancel_waitlist_entry(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except (InvalidTransition, ValueError) as e:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
-
-@router.get("/slots/{slot_id}/waitlist", response_model=List[WaitlistResponse], summary="View waitlist for slot ordered by priority")
-def view_slot_waitlist(slot_id: str, db: Session = Depends(get_db)) -> List[WaitlistResponse]:
-    entries = get_waitlist_for_slot(db=db, slot_id=slot_id)
-    response_entries: List[WaitlistResponse] = []
-    for idx, entry in enumerate(entries, start=1):
-        res = WaitlistResponse.model_validate(entry)
-        res.priority_order = idx
-        response_entries.append(res)
-    return response_entries

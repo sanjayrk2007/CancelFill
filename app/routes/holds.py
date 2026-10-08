@@ -1,4 +1,3 @@
-from typing import List
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -11,10 +10,6 @@ from app.services.allocation_service import accept_hold, decline_hold, expire_ho
 from app.services.state_machine import NotFoundError, OfferExpired, InvalidTransition
 
 router = APIRouter(prefix="/holds", tags=["Holds"])
-
-@router.get("", response_model=List[HoldResponse], summary="List all holds")
-def list_holds(db: Session = Depends(get_db)) -> List[Hold]:
-    return list(db.scalars(select(Hold)).all())
 
 @router.post("/{hold_id}/accept", response_model=BookingResponse, status_code=status.HTTP_200_OK, summary="Accept an active hold")
 def accept_hold_endpoint(

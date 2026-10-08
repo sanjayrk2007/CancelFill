@@ -20,6 +20,7 @@ from app.services.state_machine import (
     assert_transition,
     InvalidTransition,
 )
+from tests.invariants import assert_invariants
 
 def test_state_machine_slot_transitions() -> None:
     assert_transition("Slot", "AVAILABLE", "BOOKED")
@@ -79,6 +80,7 @@ def test_state_machine_booking_transitions() -> None:
 
 def test_accept_hold_by_wrong_user(
     client: TestClient,
+    db: Session,
     business_auth_headers: Dict[str, str],
     customer_auth_headers: Dict[str, str],
     customer_2_auth_headers: Dict[str, str]
@@ -99,8 +101,8 @@ def test_accept_hold_by_wrong_user(
     client.post("/api/v1/bookings", json={"slot_id": slot_id}, headers=customer_auth_headers)
     client.post("/api/v1/waitlist", json={"slot_id": slot_id}, headers=customer_2_auth_headers)
 
-    bookings = client.get("/api/v1/bookings").json()
-    booking_id = [b["id"] for b in bookings if b["slot_id"] == slot_id][0]
+    booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
+    booking_id = booking.id
 
     cancel_res = client.post(f"/api/v1/bookings/{booking_id}/cancel", headers=customer_auth_headers)
     hold_id = cancel_res.json()["hold"]["id"]
@@ -110,6 +112,7 @@ def test_accept_hold_by_wrong_user(
 
 def test_accept_hold_twice(
     client: TestClient,
+    db: Session,
     business_auth_headers: Dict[str, str],
     customer_auth_headers: Dict[str, str],
     customer_2_auth_headers: Dict[str, str]
@@ -130,8 +133,8 @@ def test_accept_hold_twice(
     client.post("/api/v1/bookings", json={"slot_id": slot_id}, headers=customer_auth_headers)
     client.post("/api/v1/waitlist", json={"slot_id": slot_id}, headers=customer_2_auth_headers)
 
-    bookings = client.get("/api/v1/bookings").json()
-    booking_id = [b["id"] for b in bookings if b["slot_id"] == slot_id][0]
+    booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
+    booking_id = booking.id
 
     cancel_res = client.post(f"/api/v1/bookings/{booking_id}/cancel", headers=customer_auth_headers)
     hold_id = cancel_res.json()["hold"]["id"]
@@ -144,6 +147,79 @@ def test_accept_hold_twice(
     accept_2 = client.post(f"/api/v1/holds/{hold_id}/accept", headers=customer_2_auth_headers)
     assert accept_2.status_code == 409
     assert accept_2.json()["detail"] == "This offer is no longer available"
+
+def test_direct_booking_held_slot_returns_409_and_preserves_active_hold(
+    client: TestClient,
+    db: Session,
+    business_user: User,
+    customer_user: User,
+    customer_user_2: User,
+    customer_2_auth_headers: Dict[str, str],
+) -> None:
+    now = datetime.now(timezone.utc)
+    slot = Slot(
+        owner_id=business_user.id,
+        resource_id="held_direct_booking_guard",
+        start_time=now + timedelta(hours=1),
+        end_time=now + timedelta(hours=2),
+        price="50.00",
+        status=SlotStatus.HELD.value,
+    )
+    hold = Hold(
+        slot=slot,
+        user_id=customer_user.id,
+        expires_at=now + timedelta(minutes=15),
+        status=HoldStatus.ACTIVE.value,
+    )
+    db.add_all([slot, hold])
+    db.commit()
+
+    res = client.post("/api/v1/bookings", json={"slot_id": slot.id}, headers=customer_2_auth_headers)
+    assert res.status_code == 409
+
+    db.expire_all()
+    slot = db.query(Slot).filter(Slot.id == slot.id).one()
+    hold = db.query(Hold).filter(Hold.id == hold.id).one()
+    assert slot.status == SlotStatus.HELD.value
+    assert hold.status == HoldStatus.ACTIVE.value
+    assert_invariants(db)
+
+def test_direct_booking_booked_slot_returns_409_and_preserves_booking(
+    client: TestClient,
+    db: Session,
+    business_user: User,
+    customer_user: User,
+    customer_user_2: User,
+    customer_2_auth_headers: Dict[str, str],
+) -> None:
+    now = datetime.now(timezone.utc)
+    slot = Slot(
+        owner_id=business_user.id,
+        resource_id="booked_direct_booking_guard",
+        start_time=now + timedelta(hours=1),
+        end_time=now + timedelta(hours=2),
+        price="50.00",
+        status=SlotStatus.BOOKED.value,
+    )
+    booking = Booking(
+        slot=slot,
+        user_id=customer_user.id,
+        booked_at=now,
+        status=BookingStatus.CONFIRMED.value,
+        source=BookingSource.DIRECT.value,
+    )
+    db.add_all([slot, booking])
+    db.commit()
+
+    res = client.post("/api/v1/bookings", json={"slot_id": slot.id}, headers=customer_2_auth_headers)
+    assert res.status_code == 409
+
+    db.expire_all()
+    slot = db.query(Slot).filter(Slot.id == slot.id).one()
+    booking = db.query(Booking).filter(Booking.id == booking.id).one()
+    assert slot.status == SlotStatus.BOOKED.value
+    assert booking.status == BookingStatus.CONFIRMED.value
+    assert_invariants(db)
 
 def test_accept_after_expiry_cascades_to_next_candidate(
     client: TestClient,
@@ -180,8 +256,8 @@ def test_accept_after_expiry_cascades_to_next_candidate(
         headers=other_customer_auth_headers
     )
 
-    bookings = client.get("/api/v1/bookings").json()
-    booking_id = [b["id"] for b in bookings if b["slot_id"] == slot_id][0]
+    booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
+    booking_id = booking.id
 
     cancel_res = client.post(f"/api/v1/bookings/{booking_id}/cancel", headers=customer_auth_headers)
     hold_id = cancel_res.json()["hold"]["id"]
@@ -241,8 +317,8 @@ def test_decline_cascades(
         headers=other_customer_auth_headers
     )
 
-    bookings = client.get("/api/v1/bookings").json()
-    booking_id = [b["id"] for b in bookings if b["slot_id"] == slot_id][0]
+    booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
+    booking_id = booking.id
 
     cancel_res = client.post(f"/api/v1/bookings/{booking_id}/cancel", headers=customer_auth_headers)
     hold_id = cancel_res.json()["hold"]["id"]
@@ -265,6 +341,7 @@ def test_decline_cascades(
 
 def test_double_cancel(
     client: TestClient,
+    db: Session,
     business_auth_headers: Dict[str, str],
     customer_auth_headers: Dict[str, str]
 ) -> None:
@@ -282,8 +359,8 @@ def test_double_cancel(
     slot_id = slot_res.json()["id"]
 
     client.post("/api/v1/bookings", json={"slot_id": slot_id}, headers=customer_auth_headers)
-    bookings = client.get("/api/v1/bookings").json()
-    booking_id = [b["id"] for b in bookings if b["slot_id"] == slot_id][0]
+    booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
+    booking_id = booking.id
 
     cancel_1 = client.post(f"/api/v1/bookings/{booking_id}/cancel", headers=customer_auth_headers)
     assert cancel_1.status_code == 200
@@ -337,6 +414,7 @@ def test_waitlist_rule_violations(
 
 def test_full_cycle_api(
     client: TestClient,
+    db: Session,
     business_auth_headers: Dict[str, str],
     customer_auth_headers: Dict[str, str],
     customer_2_auth_headers: Dict[str, str],
@@ -425,8 +503,8 @@ def test_full_cycle_api(
     assert recovered_booking["recovered_from_booking_id"] == first_booking_id
     assert recovered_booking["user_id"] == customer_user_2.id
 
-    slot_check = client.get(f"/api/v1/slots/{slot_id}")
-    assert slot_check.json()["status"] == "BOOKED"
+    slot = db.query(Slot).filter(Slot.id == slot_id).one()
+    assert slot.status == "BOOKED"
 
 def test_db_partial_unique_index_guards(
     db: Session,

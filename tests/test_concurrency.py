@@ -251,3 +251,76 @@ def test_concurrent_accept_and_expire_overdue_hold_ends_consistently(db: Session
         assert active_holds[0].user_id == second.id
         assert refreshed_slot.status == SlotStatus.HELD.value
     assert_invariants(db)
+
+
+@pytest.mark.parametrize("repeat", range(5))
+def test_concurrent_direct_bookers_cannot_steal_held_slot_from_accepting_hold_owner(db: Session, repeat: int) -> None:
+    now = datetime.now(timezone.utc)
+    business = _user(db, f"steal-biz-{repeat}@example.com", UserRole.BUSINESS)
+    hold_owner = _user(db, f"steal-owner-{repeat}@example.com")
+    direct_bookers = [_user(db, f"steal-direct-{repeat}-{i}@example.com") for i in range(10)]
+    original = _user(db, f"steal-original-{repeat}@example.com")
+    slot = _slot(db, business, f"steal-{repeat}", SlotStatus.HELD)
+    cancelled_booking = Booking(
+        slot_id=slot.id,
+        user_id=original.id,
+        booked_at=now - timedelta(minutes=1),
+        status=BookingStatus.CANCELLED.value,
+        source=BookingSource.DIRECT.value,
+    )
+    entry = WaitlistEntry(
+        slot_id=slot.id,
+        user_id=hold_owner.id,
+        joined_at=now,
+        status=WaitlistStatus.OFFERED.value,
+    )
+    hold = Hold(
+        slot_id=slot.id,
+        user_id=hold_owner.id,
+        expires_at=now + timedelta(minutes=15),
+        status=HoldStatus.ACTIVE.value,
+    )
+    db.add_all([cancelled_booking, entry, hold])
+    db.commit()
+
+    barrier = threading.Barrier(11)
+
+    def direct_worker(user_id: str) -> int:
+        session = TestingSessionLocal()
+        try:
+            barrier.wait(timeout=10)
+            try:
+                book_slot(session, slot.id, user_id)
+                return 201
+            except CONFLICT_EXCEPTIONS:
+                session.rollback()
+                return 409
+        finally:
+            session.close()
+
+    def accept_worker() -> int:
+        session = TestingSessionLocal()
+        try:
+            barrier.wait(timeout=10)
+            try:
+                accept_hold(session, hold.id, hold_owner.id)
+                return 200
+            except CONFLICT_EXCEPTIONS:
+                session.rollback()
+                return 409
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=11) as executor:
+        futures = [executor.submit(direct_worker, user.id) for user in direct_bookers]
+        futures.append(executor.submit(accept_worker))
+        results = [future.result() for future in futures]
+
+    assert results.count(200) == 1
+    assert results.count(201) == 0
+    assert results.count(409) == 10
+    db.expire_all()
+    confirmed = db.query(Booking).filter(Booking.slot_id == slot.id, Booking.status == BookingStatus.CONFIRMED.value).all()
+    assert len(confirmed) == 1
+    assert confirmed[0].user_id == hold_owner.id
+    assert_invariants(db)

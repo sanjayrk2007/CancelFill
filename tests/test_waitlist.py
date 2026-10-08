@@ -1,10 +1,12 @@
 from datetime import datetime, timezone, timedelta
 from typing import Dict
 from fastapi.testclient import TestClient
-from app.models import User
+from sqlalchemy.orm import Session
+from app.models import User, WaitlistEntry
 
 def test_waitlist_registration_and_priority(
     client: TestClient,
+    db: Session,
     customer_user: User,
     customer_user_2: User,
     business_auth_headers: Dict[str, str],
@@ -58,15 +60,11 @@ def test_waitlist_registration_and_priority(
     assert res_a.status_code == 201
     assert res_a.json()["user_id"] == customer_user.id
 
-    waitlist_res = client.get(f"/api/v1/slots/{slot_id}/waitlist")
-    assert waitlist_res.status_code == 200
-    entries = waitlist_res.json()
+    entries = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id).order_by(WaitlistEntry.joined_at.asc()).all()
     assert len(entries) == 2
     
-    assert entries[0]["user_id"] == customer_user.id
-    assert entries[0]["priority_order"] == 1
-    assert entries[1]["user_id"] == customer_user_2.id
-    assert entries[1]["priority_order"] == 2
+    assert entries[0].user_id == customer_user.id
+    assert entries[1].user_id == customer_user_2.id
 
 def test_waitlist_auth_gates(
     client: TestClient,

@@ -69,6 +69,8 @@ def book_slot(
         slot = db.scalars(select(Slot).where(Slot.id == slot_id).with_for_update()).first()
         if not slot:
             raise NotFoundError(f"Slot '{slot_id}' not found.")
+        if slot.status != SlotStatus.AVAILABLE.value:
+            raise InvalidTransition("Slot", slot.status, SlotStatus.BOOKED.value)
         assert_transition("Slot", slot.status, SlotStatus.BOOKED.value)
         current_time = now or datetime.now(timezone.utc)
         booking = Booking(

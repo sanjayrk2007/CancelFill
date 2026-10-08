@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict
 from fastapi import FastAPI, Depends, HTTPException, status
@@ -8,12 +9,11 @@ from app.database import Base, engine, get_db
 from app.routes import slots, waitlist, bookings, cancellations, holds, auth, me, business
 from app.services.scheduler import start_scheduler, stop_scheduler
 
+logging.basicConfig(level=logging.INFO)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    try:
-        Base.metadata.create_all(bind=engine)
-    except Exception:
-        pass
+    Base.metadata.create_all(bind=engine)
     start_scheduler()
     try:
         yield
