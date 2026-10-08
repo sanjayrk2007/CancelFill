@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     SCHEDULER_INTERVAL_SECONDS: int = 15
     JWT_SECRET: str = "dev-secret-key-change-in-production"
     JWT_EXPIRE_MINUTES: int = 60
+    CORS_ORIGINS: str = "http://localhost:5173"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

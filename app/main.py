@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Dict
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.config import settings
@@ -42,6 +43,15 @@ This API demonstrates the four completed Review-1 modules:
         {"name": "Holds", "description": "Inspect holds and evaluate timestamp expiry"},
     ],
     lifespan=lifespan
+)
+
+cors_origins: list[str] = [origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(auth.router, prefix=settings.API_V1_STR)

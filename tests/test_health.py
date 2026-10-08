@@ -23,3 +23,14 @@ def test_health_check_unreachable(client: TestClient) -> None:
         assert response.json() == {"detail": "Database unreachable"}
     finally:
         app.dependency_overrides.clear()
+
+def test_cors_headers(client: TestClient) -> None:
+    response = client.options(
+        "/api/v1/slots",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
