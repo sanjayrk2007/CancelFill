@@ -41,10 +41,10 @@ export default function Layout() {
   ];
 
   const businessLinks = [
+    { to: '/business/dashboard', label: 'Dashboard', icon: BarChart3 },
     { to: '/business/slots', label: 'Manage Slots', icon: Layers },
     { to: '/business/waitlist', label: 'Waitlists', icon: Users },
     { to: '/business/bookings', label: 'Bookings', icon: CheckCircle },
-    { to: '/business/stats', label: 'Stats & Recovery', icon: BarChart3 },
   ];
 
   const activeLinks = role === 'BUSINESS' ? businessLinks : role === 'CUSTOMER' ? customerLinks : [];
@@ -62,7 +62,7 @@ export default function Layout() {
           {/* Logo & Brand */}
           <div className="flex items-center gap-8">
             <NavLink
-              to={role === 'BUSINESS' ? '/business/slots' : role === 'CUSTOMER' ? '/slots' : '/login'}
+              to={role === 'BUSINESS' ? '/business/dashboard' : role === 'CUSTOMER' ? '/slots' : '/login'}
               className="flex items-center gap-2.5 font-bold text-xl tracking-tight text-white hover:opacity-90 transition-opacity"
             >
               <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-md shadow-indigo-500/30 border border-indigo-400/30">

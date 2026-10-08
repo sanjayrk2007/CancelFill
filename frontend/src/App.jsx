@@ -33,7 +33,7 @@ function HomeRedirect() {
     return <Navigate to="/login" replace />;
   }
 
-  return <Navigate to={role === 'BUSINESS' ? '/business/slots' : '/slots'} replace />;
+  return <Navigate to={role === 'BUSINESS' ? '/business/dashboard' : '/slots'} replace />;
 }
 
 export default function App() {
@@ -82,6 +82,14 @@ export default function App() {
         />
 
         {/* Business protected routes (P7c) */}
+        <Route
+          path="business/dashboard"
+          element={
+            <ProtectedRoute allowedRoles={['BUSINESS']}>
+              <BusinessStatsPage />
+            </ProtectedRoute>
+          }
+        />
         <Route
           path="business/slots"
           element={
