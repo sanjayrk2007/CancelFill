@@ -2,34 +2,51 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
+from app.dependencies import require_customer
+from app.models import User, WaitlistEntry
 from app.schemas import WaitlistCreate, WaitlistResponse
-from app.services.waitlist_service import register_waitlist_entry, get_waitlist_for_slot
+from app.services.allocation_service import join_waitlist, leave_waitlist, get_waitlist_for_slot
+from app.services.state_machine import NotFoundError, InvalidTransition
 
 router = APIRouter(tags=["Waitlist"])
 
 @router.post("/waitlist", response_model=WaitlistResponse, status_code=status.HTTP_201_CREATED, summary="Register customer on waitlist")
-def add_to_waitlist(entry_in: WaitlistCreate, db: Session = Depends(get_db)):
-    """
-    Registers a customer on the waitlist for a specific slot.
-    """
+def add_to_waitlist(
+    entry_in: WaitlistCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_customer)
+) -> WaitlistEntry:
     try:
-        entry = register_waitlist_entry(
+        return join_waitlist(
             db=db,
             slot_id=entry_in.slot_id,
-            user_id=entry_in.user_id,
+            user_id=current_user.id,
             joined_at=entry_in.joined_at
         )
-        return entry
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except (InvalidTransition, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+@router.delete("/waitlist/{waitlist_id}", response_model=WaitlistResponse, status_code=status.HTTP_200_OK, summary="Cancel waitlist entry")
+def cancel_waitlist_entry(
+    waitlist_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_customer)
+) -> WaitlistEntry:
+    try:
+        return leave_waitlist(db=db, waitlist_id=waitlist_id, actor=current_user)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (InvalidTransition, ValueError) as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
 
 @router.get("/slots/{slot_id}/waitlist", response_model=List[WaitlistResponse], summary="View waitlist for slot ordered by priority")
-def view_slot_waitlist(slot_id: str, db: Session = Depends(get_db)):
-    """
-    Returns active waitlist entries for a slot ordered by join time (earlier join time = higher priority).
-    """
+def view_slot_waitlist(slot_id: str, db: Session = Depends(get_db)) -> List[WaitlistResponse]:
     entries = get_waitlist_for_slot(db=db, slot_id=slot_id)
-    response_entries = []
+    response_entries: List[WaitlistResponse] = []
     for idx, entry in enumerate(entries, start=1):
         res = WaitlistResponse.model_validate(entry)
         res.priority_order = idx

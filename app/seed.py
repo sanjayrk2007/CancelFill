@@ -1,73 +1,98 @@
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from app.database import SessionLocal, Base, engine
-from app.models import Slot, SlotStatus, WaitlistEntry, WaitlistStatus, Booking, BookingStatus, Hold
+from app.models import Slot, SlotStatus, WaitlistEntry, WaitlistStatus, Booking, BookingStatus, User, UserRole
+from app.security import hash_password
 
-def seed_database():
-    """
-    Populates a small, deterministic seed dataset for Review-1 demonstration.
-    
-    Dataset contents:
-    - 2 Slots:
-        * Slot 1: Booked by Charlie (has 2 waitlist entries)
-        * Slot 2: Available
-    - 2 Waitlist entries for Slot 1:
-        * Customer A (Alice): Joined earlier (10:00 AM UTC) -> Highest Priority
-        * Customer B (Bob): Joined later (10:05 AM UTC) -> Second Priority
-    - 1 Active Booking for Slot 1 (Charlie) ready to be cancelled during the demo.
-    """
-    # Recreate tables for clean seed state
+def seed_database() -> None:
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
 
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
+        pwd_hash = hash_password("password123")
 
-        # 1. Create Slots
+        biz_user = User(
+            id="user-biz-1",
+            email="dr_smith@example.com",
+            name="Dr. Smith",
+            password_hash=pwd_hash,
+            role=UserRole.BUSINESS.value,
+            created_at=now - timedelta(days=1)
+        )
+        cust_alice = User(
+            id="user-cust-alice",
+            email="alice@example.com",
+            name="Alice",
+            password_hash=pwd_hash,
+            role=UserRole.CUSTOMER.value,
+            created_at=now - timedelta(days=1)
+        )
+        cust_bob = User(
+            id="user-cust-bob",
+            email="bob@example.com",
+            name="Bob",
+            password_hash=pwd_hash,
+            role=UserRole.CUSTOMER.value,
+            created_at=now - timedelta(days=1)
+        )
+        cust_charlie = User(
+            id="user-cust-charlie",
+            email="charlie@example.com",
+            name="Charlie",
+            password_hash=pwd_hash,
+            role=UserRole.CUSTOMER.value,
+            created_at=now - timedelta(days=1)
+        )
+
+        db.add_all([biz_user, cust_alice, cust_bob, cust_charlie])
+        db.commit()
+
         slot1 = Slot(
             id="slot-demo-1",
+            owner_id=biz_user.id,
             resource_id="Dr_Smith_Consultation_10AM",
             start_time=now + timedelta(hours=2),
             end_time=now + timedelta(hours=3),
+            price=Decimal("50.00"),
             status=SlotStatus.BOOKED.value
         )
 
         slot2 = Slot(
             id="slot-demo-2",
+            owner_id=biz_user.id,
             resource_id="Dr_Smith_Consultation_11AM",
             start_time=now + timedelta(hours=3),
             end_time=now + timedelta(hours=4),
+            price=Decimal("75.00"),
             status=SlotStatus.AVAILABLE.value
         )
 
         db.add_all([slot1, slot2])
         db.commit()
 
-        # 2. Create Active Booking on Slot 1
         booking1 = Booking(
             id="booking-demo-1",
             slot_id=slot1.id,
-            user_id="user_charlie",
+            user_id=cust_charlie.id,
             booked_at=now - timedelta(hours=1),
             status=BookingStatus.CONFIRMED.value
         )
         db.add(booking1)
         db.commit()
 
-        # 3. Create Waitlist Entries for Slot 1 with clear timestamp ordering
-        # Customer A (Alice) joined 30 mins ago
         waitlist_a = WaitlistEntry(
             id="waitlist-a",
             slot_id=slot1.id,
-            user_id="customer_a_alice",
+            user_id=cust_alice.id,
             joined_at=now - timedelta(minutes=30),
             status=WaitlistStatus.WAITING.value
         )
-        # Customer B (Bob) joined 15 mins ago
         waitlist_b = WaitlistEntry(
             id="waitlist-b",
             slot_id=slot1.id,
-            user_id="customer_b_bob",
+            user_id=cust_bob.id,
             joined_at=now - timedelta(minutes=15),
             status=WaitlistStatus.WAITING.value
         )
@@ -78,10 +103,12 @@ def seed_database():
         print("=" * 60)
         print("SEED DATA SUCCESSFULLY POPULATED FOR REVIEW-1 DEMO")
         print("=" * 60)
+        print(f"Business User:             {biz_user.email} (ID: {biz_user.id})")
+        print(f"Customer Alice:            {cust_alice.email} (ID: {cust_alice.id})")
+        print(f"Customer Bob:              {cust_bob.email} (ID: {cust_bob.id})")
+        print(f"Customer Charlie:          {cust_charlie.email} (ID: {cust_charlie.id})")
         print(f"Slot 1 ID (Booked):         {slot1.id}")
         print(f"Booking ID (to Cancel):    {booking1.id} (User: {booking1.user_id})")
-        print(f"Waitlist Customer A:       {waitlist_a.user_id} (Joined 30m ago)")
-        print(f"Waitlist Customer B:       {waitlist_b.user_id} (Joined 15m ago)")
         print(f"Slot 2 ID (Available):      {slot2.id}")
         print("=" * 60)
 
