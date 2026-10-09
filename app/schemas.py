@@ -27,6 +27,25 @@ class UserResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+class UserUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    name: str = Field(..., min_length=1, max_length=60, json_schema_extra={"example": "Alice"})
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+
+class CustomerStatsResponse(BaseModel):
+    total_bookings: int
+    upcoming_bookings: int
+    recovered_bookings: int
+    cancelled_bookings: int
+    offers_received: int
+    offers_accepted: int
+    offers_declined: int
+    offers_expired: int
+    acceptance_rate: float
+    active_waitlist_entries: int
 class SlotCreate(BaseModel):
     resource_id: str = Field(..., json_schema_extra={"example": "room_101"})
     start_time: datetime = Field(..., json_schema_extra={"example": "2026-09-01T10:00:00Z"})

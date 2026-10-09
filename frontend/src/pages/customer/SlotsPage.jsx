@@ -102,22 +102,24 @@ export default function SlotsPage() {
   // Group filtered slots by local day (e.g. "Thu 10 Oct 2026")
   const groupedSlots = useMemo(() => {
     const groups = {};
-    filteredSlots.forEach((slot) => {
-      const dateObj = new Date(slot.start_time);
-      const dayKey = isNaN(dateObj.getTime())
-        ? 'Upcoming Slots'
-        : new Intl.DateTimeFormat('en-US', {
+    [...filteredSlots]
+      .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
+      .forEach((slot) => {
+        const dateObj = new Date(slot.start_time);
+        const dayKey = isNaN(dateObj.getTime())
+          ? 'Upcoming Slots'
+          : new Intl.DateTimeFormat('en-US', {
             weekday: 'long',
             day: 'numeric',
             month: 'long',
             year: 'numeric',
           }).format(dateObj);
 
-      if (!groups[dayKey]) {
-        groups[dayKey] = [];
-      }
-      groups[dayKey].push(slot);
-    });
+        if (!groups[dayKey]) {
+          groups[dayKey] = [];
+        }
+        groups[dayKey].push(slot);
+      });
     return groups;
   }, [filteredSlots]);
 
@@ -171,33 +173,30 @@ export default function SlotsPage() {
           <button
             type="button"
             onClick={() => setFilter('ALL')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-              filter === 'ALL'
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${filter === 'ALL'
                 ? 'bg-white text-zinc-900 font-semibold shadow-xs'
                 : 'text-zinc-600 hover:text-zinc-900'
-            }`}
+              }`}
           >
             All ({slots.length})
           </button>
           <button
             type="button"
             onClick={() => setFilter('AVAILABLE')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-              filter === 'AVAILABLE'
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${filter === 'AVAILABLE'
                 ? 'bg-white text-zinc-900 font-semibold shadow-xs'
                 : 'text-zinc-600 hover:text-zinc-900'
-            }`}
+              }`}
           >
             Available ({availableCount})
           </button>
           <button
             type="button"
             onClick={() => setFilter('WAITLIST')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-              filter === 'WAITLIST'
+            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${filter === 'WAITLIST'
                 ? 'bg-white text-zinc-900 font-semibold shadow-xs'
                 : 'text-zinc-600 hover:text-zinc-900'
-            }`}
+              }`}
           >
             Waitlist ({waitlistCount})
           </button>
@@ -228,8 +227,8 @@ export default function SlotsPage() {
             searchQuery
               ? `No appointment slots matching "${searchQuery}".`
               : filter !== 'ALL'
-              ? `No slots matching filter "${filter.toLowerCase()}".`
-              : 'There are currently no slots published in the system.'
+                ? `No slots matching filter "${filter.toLowerCase()}".`
+                : 'There are currently no slots published in the system.'
           }
           action={
             searchQuery || filter !== 'ALL' ? (

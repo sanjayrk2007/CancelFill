@@ -41,8 +41,8 @@ def test_create_slot_naive_datetime(client: TestClient, business_auth_headers: D
         "/api/v1/slots",
         json={
             "resource_id": "room_naive_tz",
-            "start_time": "2026-09-01T10:00:00",
-            "end_time": "2026-09-01T11:00:00",
+            "start_time": "2027-09-01T10:00:00",
+            "end_time": "2027-09-01T11:00:00",
             "price": "25.50"
         },
         headers=business_auth_headers
@@ -57,8 +57,8 @@ def test_create_slot_end_time_before_start_time(client: TestClient, business_aut
         "/api/v1/slots",
         json={
             "resource_id": "invalid_time_room",
-            "start_time": "2026-09-01T12:00:00Z",
-            "end_time": "2026-09-01T11:00:00Z",
+            "start_time": "2027-09-01T12:00:00Z",
+            "end_time": "2027-09-01T11:00:00Z",
             "price": "10.00"
         },
         headers=business_auth_headers
@@ -71,8 +71,8 @@ def test_create_slot_auth_gates(
 ) -> None:
     payload = {
         "resource_id": "room_auth",
-        "start_time": "2026-09-01T10:00:00Z",
-        "end_time": "2026-09-01T11:00:00Z",
+        "start_time": "2027-09-01T10:00:00Z",
+        "end_time": "2027-09-01T11:00:00Z",
         "price": "10.00"
     }
     res_no_auth = client.post("/api/v1/slots", json=payload)

@@ -1,331 +1,294 @@
 # CancelFill — Intelligent Cancellation Recovery & Waitlist Platform
 
-> **Turn cancelled appointments into recovered revenue.**
+> **From cancelled slot to recovered booking.**
+
+CancelFill turns last-minute cancellations into recovered revenue. When a booking is cancelled, the freed slot is automatically offered to the earliest waitlisted customer as a time-limited hold. If they accept, the booking is confirmed. If they decline or the hold expires, the next customer is offered the slot, with no manual calls or messages.
+
+It is built for appointment-based businesses such as clinics, salons, tutors, and sports facilities.
 
 ---
 
-## 📋 Overview
+## 1. Problem Statement
 
-Appointment-based businesses—such as medical clinics, salons, private tutors, sports facilities, and service centers—lose valuable operational capacity when customers cancel at short notice. Even when other customers are actively waiting for an opening, manually contacting them is slow, inconsistent, and difficult to manage.
+| Problem | Impact |
+| :--- | :--- |
+| Late cancellations leave slots empty | Lost revenue and idle capacity |
+| Waiting customers don't know a slot opened | Unmet demand |
+| Staff contact waitlisted customers by hand | Slow, inconsistent, error-prone |
+| Several customers may claim one slot at once | Risk of double-booking |
 
-**CancelFill** addresses this problem by maintaining an ordered waitlist and managing the automated lifecycle of allocating newly released slots to eligible candidates.
-
----
-
-## 🎯 The Problem
-
-- **Unused Capacity**: Last-minute cancellations leave valuable time slots empty without sufficient notice to fill them manually.
-- **Wasted Demand**: Customers are frequently looking for earlier availability but lack an efficient mechanism to claim newly opened slots.
-- **Manual Overhead**: Reaching out to waitlisted clients line-by-line via phone or manual messaging is slow and error-prone.
-- **Lost Revenue**: Businesses permanently forfeit revenue from unfulfilled slots that could have been recovered.
+**Core engineering question:** when 20 customers are waiting for one cancelled slot, how do we guarantee that *exactly one* of them receives the confirmed booking, even if several act in the same millisecond?
 
 ---
 
-## 💡 The CancelFill Solution
+## 2. Requirements
 
-CancelFill is designed to automatically recover cancelled capacity through a structured workflow:
+### Functional
+- Business users create and manage time slots and view bookings, waitlists, and recovery statistics.
+- Customers browse slots, book, join and leave waitlists, and accept or decline offers.
+- Cancelling a booking releases the slot and offers it to the earliest waitlisted customer (`joined_at ASC`).
+- Each offer is a temporary hold (default 15 minutes) that expires automatically.
+- A declined or expired offer cascades to the next waiting customer.
+- Role-based access: `CUSTOMER` and `BUSINESS`.
 
-```
-[ Booking Cancelled ]
-          │
-          ▼
-   [ Slot Released ]
-          │
-          ▼
-  [ Waitlist Evaluated ]
-          │
-          ▼
- [ Candidate Selected ]
-          │
-          ▼
-   [ Temporary Hold ]
-          │
-          ▼
-[ Offer Accepted / Expired ]
-          │
-  ┌───────┴───────┐
-  ▼               ▼
-[ Confirmed ]   [ Offer Next Candidate ]
-```
-
----
-
-## ⚡ Why This Is More Than a Simple Waitlist
-
-CancelFill goes beyond basic notification systems ("customer joins waitlist → customer receives alert"). A robust allocation system must handle:
-
-- **Priority Ordering**: Fairly ranking candidates based on request time and rules.
-- **Temporary Allocation**: Reserving a slot for a single customer without double-booking.
-- **Expiration & Timeouts**: Releasing unclaimed holds when the candidate does not respond within the allocated timeframe.
-- **State Management**: Keeping slot, waitlist, hold, and booking statuses strictly synchronized.
-- **Competing Requests**: Preventing race conditions when multiple customers or systems interact with the same slot.
-
----
-
-## 🧠 Core Engineering Challenge — Concurrency & Allocation
-
-Consider a popular sports facility with **20 customers waiting for a single cancelled court slot**:
-
-When the slot opens up:
-1. *Who gets priority?*
-2. *How long should the selected candidate have to accept the offer?*
-3. *What happens if they fail to respond before the offer expires?*
-4. *What if two users attempt to claim the slot at almost the exact same millisecond?*
-5. *How does the system guarantee that exactly **one** customer receives the confirmed booking?*
-
-These requirements transform CancelFill from a CRUD application into a genuine software engineering challenge involving temporary resource locking, transaction management, and state machine design.
-
----
-
-## 🔄 State Machine & Slot Lifecycle
-
-### Intended Slot State Machine
-
-```
-   [ AVAILABLE ]
-        │ (Booking Created)
-        ▼
-    [ BOOKED ]
-        │ (Booking Cancelled)
-        ▼
-   [ AVAILABLE ]
-        │ (Candidate Selected)
-        ▼
-     [ HELD ] ─────(Hold Expires)────┐
-        │                            │
-        │ (Offer Accepted)           ▼
-        ▼                      [ AVAILABLE ]
-   [ CONFIRMED ]
-```
-
-*Note: In the planned production system, database transactions (`SELECT ... FOR UPDATE` or optimistic locking) will guarantee atomic state transitions, preventing double-booking during concurrent acceptances.*
-
----
-
-## ✨ Feature Breakdown
-
-| Feature Category | Feature Description | Status |
+### Non-Functional
+| Quality | Requirement | How it is addressed |
 | :--- | :--- | :--- |
-| **Business** | Create & manage resource time slots | `[Implemented - Review-1]` |
-| **Business** | Maintain ordered customer waitlists | `[Implemented - Review-1]` |
-| **Business** | Cancel bookings & trigger slot recovery | `[Implemented - Review-1]` |
-| **Business** | Recovered revenue & conversion dashboard | `[Planned]` |
-| **Customer** | Join slot waitlist with timestamp tracking | `[Implemented - Review-1]` |
-| **Customer** | View current waitlist position / status | `[Implemented - Review-1]` |
-| **Customer** | Web/Mobile interface to accept or decline slot offers | `[Planned]` |
-| **Allocation** | Priority ranking based on earliest join time (`joined_at ASC`) | `[Implemented - Review-1]` |
-| **Allocation** | Temporary hold generation (`created_at`, `expires_at`, `status`) | `[Implemented - Review-1]` |
-| **Allocation** | Timestamp-based hold expiry evaluation | `[Implemented - Review-1]` |
-| **Allocation** | Background scheduler worker for automatic expiry enforcement | `[Planned]` |
-| **Allocation** | Automatic cascading offers to next waitlist candidate | `[Planned]` |
-| **Concurrency** | Atomic transaction control & race-condition prevention | `[Planned]` |
-| **Notifications**| Email, SMS, and Push notification delivery | `[Planned]` |
+| **Correctness** | Never double-book a slot | Row-level locking (`SELECT … FOR UPDATE`) inside transactions |
+| **Consistency** | Slot, hold, waitlist, and booking states never contradict each other | Explicit state machine plus invariant tests |
+| **Reliability** | Expired holds are always released | Background scheduler with per-hold transactions |
+| **Security** | Authenticated, role-restricted access | JWT authentication, bcrypt password hashing, ownership checks |
+| **Testability** | Business rules verifiable without a UI | Service layer separated from HTTP layer, injectable clock (`now`) |
+| **Maintainability** | Clear separation of concerns | Layered architecture (routes → services → models) |
 
 ---
 
-## 📌 Current Review-1 Implementation
+## 3. Solution Overview
 
-For the **Software Engineering Review-1 Evaluation**, the repository demonstrates **four completed core modules**:
+```
+[ Booking Cancelled ] → [ Slot Released ] → [ Waitlist Evaluated ]
+        → [ Candidate Selected ] → [ Temporary Hold ]
+        → [ Accepted ]  → [ Confirmed (recovered booking) ]
+        → [ Declined / Expired ] → [ Offer next candidate ]
+```
 
-1. **PostgreSQL Database Schema**:
-   - `slots`: Manages slot resource allocation (`AVAILABLE`, `BOOKED`, `HELD`).
-   - `waitlist_entries`: Tracks customer join timestamps (`joined_at`) and statuses (`WAITING`, `OFFERED`, `CANCELLED`, `EXPIRED`).
-   - `holds`: Records temporary candidate holds (`created_at`, `expires_at`, `status`).
-   - `bookings`: Manages initial bookings for cancellation triggers (`CONFIRMED`, `CANCELLED`).
+### Slot State Machine
 
-2. **Core FastAPI Backend Scaffold**:
-   - Clean, runnable FastAPI server with Pydantic request/response validation.
-   - Endpoints for slot creation (`POST /api/v1/slots`), slot listing (`GET /api/v1/slots`), waitlist registration (`POST /api/v1/waitlist`), and waitlist ordering (`GET /api/v1/slots/{id}/waitlist`).
+```
+                 book
+  [ AVAILABLE ] ───────────▶ [ BOOKED ]
+       ▲  │                      │
+       │  │ candidate selected   │ cancel
+       │  ▼                      │
+       │ [ HELD ] ◀──────────────┘ (via AVAILABLE, then offer)
+       │   │   │
+       │   │   └── accept ─────▶ [ BOOKED ]  (booking source = RECOVERED)
+       └───┴── decline / expire
+```
 
-3. **First-Pass Cancellation → Candidate Selection**:
-   - Cancelling a booking (`POST /api/v1/bookings/{id}/cancel`) sets booking status to `CANCELLED` and releases the slot.
-   - Evaluates active waitlist entries ordered by `joined_at ASC` (earliest join time = highest priority).
-   - Selects the earliest candidate, marks entry as `OFFERED`, creates a temporary hold with a 15-minute expiration, and transitions slot status to `HELD`.
+Hold, waitlist entry, and booking each have their own state machine. Allowed transitions are declared in one place, and any illegal transition is rejected.
 
-4. **Basic Hold Expiry Prototype**:
-   - Timestamp-based evaluation (`POST /api/v1/holds/{id}/check-expiry`) checking `current_time > expires_at`.
-   - If expired, transitions `hold.status` to `EXPIRED` and releases `slot.status` back to `AVAILABLE`.
-   - *Note: Review-1 uses explicit timestamp evaluation endpoints; background cron workers are part of future sprints.*
+| Entity | States |
+| :--- | :--- |
+| Slot | `AVAILABLE`, `BOOKED`, `HELD` |
+| Hold | `ACTIVE` → `CONFIRMED` / `EXPIRED` / `DECLINED` |
+| Waitlist entry | `WAITING` → `OFFERED` → `CONFIRMED` / `DECLINED` / `EXPIRED` (or `CANCELLED`) |
+| Booking | `CONFIRMED` → `CANCELLED` (source: `DIRECT` or `RECOVERED`) |
 
 ---
 
-## 🚀 Planned / Next Sprints
-
-The following components are scheduled for future development phases:
-
-- ⏳ **Atomic Confirmation & Locking**: Database row locking (`SELECT FOR UPDATE`) to handle concurrent acceptances safely.
-- ⏳ **Background Scheduler**: Background process (Celery / APScheduler) for periodic hold expiry checks.
-- ⏳ **Cascading Offers**: Automatically issuing offers to candidate #2 if candidate #1's hold expires.
-- ⏳ **Notification Infrastructure**: Twilio (SMS) / SendGrid (Email) integration for instant offer delivery.
-- ⏳ **Frontend Web Interface**: React-based portal for customers and business administrators.
-- ⏳ **Business Dashboard**: Analytics tracking recovered slots, conversion rates, and revenue saved.
-
----
-
-## 🛠️ Software Engineering Focus & SDLC
-
-CancelFill applies core software engineering concepts including state machine design, relational database modeling, RESTful API design, temporary resource allocation, and timestamp evaluation.
-
-### Recommended Incremental SDLC Progression
+## 4. Architecture
 
 ```
-[ Phase 1: Database Schema & Core APIs ] ──▶ (Completed - Review-1)
-                   │
-                   ▼
-[ Phase 2: Waitlist Priority & Cancellation Logic ] ──▶ (Completed - Review-1)
-                   │
-                   ▼
-[ Phase 3: Temporary Hold & Expiry Prototype ] ──▶ (Completed - Review-1)
-                   │
-                   ▼
-[ Phase 4: Atomic Concurrency & Lock Management ] ──▶ (Planned)
-                   │
-                   ▼
-[ Phase 5: Background Scheduler & Cascading Offers ] ──▶ (Planned)
-                   │
-                   ▼
-[ Phase 6: Notifications & User Interface ] ──▶ (Planned)
+  React + Vite frontend (customer & business portals)
+                      │  REST / JSON (JWT)
+                      ▼
+  FastAPI backend ── Routes (HTTP, validation, auth)
+                      │
+                      ├─ Services (business rules, state machine, allocation)
+                      │
+                      ├─ APScheduler (hold-expiry job, every 15 s)
+                      ▼
+  PostgreSQL (transactions, row locks, constraints)
 ```
 
----
+| Layer | Responsibility |
+| :--- | :--- |
+| **Routes** | HTTP contract, request/response schemas, authentication and authorization |
+| **Services** | All business rules: allocation, expiry, cascading offers, state transitions |
+| **Models** | Persistence and relational constraints |
+| **Scheduler** | Periodic enforcement of hold expiry |
 
-## 🏗️ System Architecture & Tech Stack
+### Key Design Decisions
 
-### High-Level Architecture
-
-```
-  Customer Web App / Business Dashboard (Planned)
-                        │
-                        ▼
-             FastAPI Backend (Active)
-                        │
-                        ▼
-            PostgreSQL Database (Active)
-```
-
-### Technology Stack
-
-| Domain | Currently Implemented (Review-1) | Planned / Future |
+| Decision | Rationale | Trade-off |
 | :--- | :--- | :--- |
-| **Backend Framework** | Python 3.10+, FastAPI, Uvicorn | — |
-| **Database & ORM** | PostgreSQL, SQLAlchemy 2.0 | Redis (for caching) |
-| **Testing** | Pytest, HTTPX TestClient | End-to-End Cypress |
-| **Scheduler** | Timestamp Evaluation Prototype | Celery / APScheduler |
-| **Frontend** | Interactive Swagger UI (`/docs`) | React, TailwindCSS |
-| **Infrastructure** | Environment Configuration (`.env`) | Docker, Cloud Deployment |
+| Pessimistic locking (`FOR UPDATE`) over optimistic locking | Contention on a single slot is high but short-lived, so waiting is cheaper than retrying | Locks are held for the transaction's duration; needs a real database such as PostgreSQL |
+| Centralised state machine | One source of truth for legal transitions | Every new state must be added there |
+| Service layer takes an injectable clock | Expiry can be tested without sleeping | Slightly more parameters per function |
+| Priority by `joined_at`, tie-broken by ID | Deterministic, explainable fairness | No weighting by customer tier or urgency |
+| In-process scheduler | Simple to deploy and run | Not safe for multiple instances without a distributed lock |
 
 ---
 
-## 📁 Repository File Structure
+## 5. Feature Status
+
+| Area | Feature | Status |
+| :--- | :--- | :--- |
+| Auth | Registration, login, JWT, customer/business roles | Done |
+| Business | Create and manage slots | Done |
+| Business | Dashboard: slots, bookings, waitlists | Done |
+| Business | Recovery statistics (utilization, conversion rate, recovered revenue) | Done |
+| Customer | Browse, book, join and leave waitlist | Done |
+| Customer | View and accept or decline offers | Done |
+| Allocation | Priority ranking by earliest join time | Done |
+| Allocation | Temporary holds with expiry | Done |
+| Allocation | Automatic expiry via background scheduler | Done |
+| Allocation | Cascading offers to the next candidate | Done |
+| Concurrency | Atomic acceptance and race-condition prevention | Done |
+| Notifications | Email / SMS / push delivery of offers | Planned |
+| Scaling | Distributed scheduler lock, caching | Planned |
+| Quality | CI pipeline, database migrations | Planned |
+
+---
+
+## 6. Tech Stack
+
+| Domain | Technology |
+| :--- | :--- |
+| Backend | Python 3.10+, FastAPI, Uvicorn, Pydantic v2 |
+| Database / ORM | PostgreSQL 16, SQLAlchemy 2.0 |
+| Background jobs | APScheduler |
+| Auth | JWT (PyJWT), bcrypt |
+| Frontend | React, Vite, Tailwind CSS, Axios |
+| Testing | Pytest, HTTPX TestClient |
+| Infrastructure | Docker Compose (PostgreSQL) |
+
+---
+
+## 7. Repository Structure
 
 ```
 CancelFill/
 ├── app/
-│   ├── __init__.py
-│   ├── main.py                 # FastAPI application entrypoint & Swagger setup
-│   ├── config.py               # Application settings & ENV handling
-│   ├── database.py             # SQLAlchemy engine & session setup
-│   ├── models.py               # ORM Models: Slot, WaitlistEntry, Hold, Booking
-│   ├── schemas.py              # Pydantic validation schemas
-│   ├── seed.py                 # Seed dataset generator for Review-1 demo
-│   ├── routes/
-│   │   ├── slots.py            # POST /slots, GET /slots, GET /slots/{id}
-│   │   ├── waitlist.py         # POST /waitlist, GET /slots/{id}/waitlist
-│   │   ├── bookings.py         # POST /bookings, GET /bookings
-│   │   ├── cancellations.py    # POST /bookings/{id}/cancel (cancellation workflow)
-│   │   └── holds.py            # GET /holds, POST /holds/{id}/check-expiry
+│   ├── main.py              # App entrypoint, router wiring, scheduler lifecycle
+│   ├── config.py            # Environment-based settings
+│   ├── database.py          # Engine and session setup
+│   ├── models.py            # ORM models and status enums
+│   ├── schemas.py           # Request / response validation
+│   ├── security.py          # Password hashing and JWT helpers
+│   ├── dependencies.py      # Auth and role dependencies
+│   ├── seed.py              # Demo data generator
+│   ├── routes/              # auth, slots, bookings, cancellations, waitlist, holds, me, business
 │   └── services/
-│       ├── waitlist_service.py # Join time priority logic (joined_at ASC)
-│       ├── cancellation_service.py # Candidate selection & hold trigger
-│       └── hold_service.py     # Timestamp-based expiry check logic
-├── schema.sql                  # Raw PostgreSQL DDL reference script
-├── tests/
-│   ├── conftest.py             # Pytest database fixtures (in-memory SQLite StaticPool)
-│   ├── test_slots.py           # Slot API unit tests
-│   ├── test_waitlist.py        # Waitlist priority & registration tests
-│   ├── test_cancellation.py    # Cancellation & candidate selection tests
-│   └── test_hold_expiry.py     # Timestamp hold expiry tests
-├── .env.example                # Configuration template
-├── .gitignore                  # Git ignore rules
-├── requirements.txt            # Project dependencies
-└── README.md                   # Project documentation
+│       ├── state_machine.py     # Legal state transitions
+│       ├── allocation_service.py# Booking, cancellation, offers, accept/decline/expire
+│       ├── waitlist_service.py  # Waitlist queries
+│       ├── hold_service.py      # Hold expiry helpers
+│       └── scheduler.py         # Background expiry job
+├── frontend/                # React portals for customers and businesses
+├── scripts/
+│   └── concurrency_demo.py  # Fires N simultaneous accepts at one hold
+├── tests/                   # Unit, API, scheduler, and concurrency tests
+├── schema.sql               # Reference DDL
+├── docker-compose.yml       # PostgreSQL service
+├── requirements.txt
+└── .env.example
 ```
 
 ---
 
-## 💻 Local Setup & Execution Guide
+## 8. Getting Started
 
 ### Prerequisites
-- Python 3.10+
-- Virtual environment (`venv`)
+Python 3.10+, Node.js 18+, Docker.
 
-### 1. Setup Virtual Environment
+### Backend
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### 2. Install Dependencies
-```bash
+python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 3. Configure Environment
-```bash
+docker compose up -d            # PostgreSQL on localhost:5433
 cp .env.example .env
+
+python -m app.seed              # optional: demo users, slots, waitlist
+uvicorn app.main:app --reload   # API docs at http://localhost:8000/docs
 ```
 
-### 4. Seed Development Dataset
-Populates 2 slots, 2 waitlist entries (with clear timestamp ordering), and 1 booking ready to cancel:
+### Frontend
 ```bash
-python -m app.seed
+cd frontend
+cp .env.example .env
+npm install
+npm run dev                     # http://localhost:5173
 ```
 
-### 5. Run FastAPI Server
-```bash
-uvicorn app.main:app --reload
-```
-Open **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)** to interact with Swagger UI.
+### Demo accounts (after seeding)
+All passwords are `password123`.
+
+| Role | Email |
+| :--- | :--- |
+| Business | `dr_smith@example.com` |
+| Customer | `alice@example.com`, `bob@example.com`, `charlie@example.com` |
+
+### Configuration (`.env`)
+| Variable | Default | Purpose |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | PostgreSQL on port 5433 | Database connection |
+| `DEFAULT_HOLD_DURATION_SECONDS` | `900` | How long an offer stays open |
+| `SCHEDULER_ENABLED` | `true` | Turn automatic expiry on or off |
+| `SCHEDULER_INTERVAL_SECONDS` | `15` | How often expiry is checked |
+| `JWT_SECRET` | dev placeholder | **Change in any real deployment** |
+| `CORS_ORIGINS` | `http://localhost:5173` | Allowed frontend origins |
 
 ---
 
-## 🧪 Automated Testing
+## 9. Testing & Verification
 
-Execute the test suite covering the four completed modules:
 ```bash
+# Fast suite (in-memory SQLite): API, allocation, auth, scheduler, reporting
 pytest
+
+# Full suite including concurrency tests (requires PostgreSQL)
+TEST_DATABASE_URL=postgresql+psycopg2://cancelfill:cancelfill@localhost:5433/cancelfill pytest
 ```
 
-**Verified Test Suite Output**:
-```text
-tests/test_cancellation.py .                                             [ 25%]
-tests/test_hold_expiry.py .                                              [ 50%]
-tests/test_slots.py .                                                    [ 75%]
-tests/test_waitlist.py .                                                 [100%]
-========================= 4 passed in 0.04s =========================
+| Test area | What it verifies |
+| :--- | :--- |
+| Allocation | Priority order, cascading offers, accept / decline / expire paths |
+| State machine | Illegal transitions are rejected |
+| Concurrency | Simultaneous accepts, cancels, and expiries leave the system consistent |
+| Invariants | After every race: at most one active hold, at most one confirmed booking, never both, and slot status always matches |
+| Auth & roles | Unauthorized and cross-owner actions are refused |
+| Scheduler | Due holds are expired and the next candidate is offered |
+
+SQLite is used for speed, and the concurrency tests run on PostgreSQL because SQLite does not enforce row-level locks.
+
+### Concurrency demonstration
+With the server running:
+```bash
+python scripts/concurrency_demo.py --n 20
 ```
+Twenty simultaneous accept requests hit one hold. Expected result: **1 success, 19 conflicts (HTTP 409)**.
 
 ---
 
-## 🎬 Review-1 Live Demonstration Sequence
+## 10. Demonstration Script
 
-Follow this step-by-step flow in Swagger UI (`http://127.0.0.1:8000/docs`):
-
-1. **Seed Data**: Run `python -m app.seed` to initialize demo IDs (`slot-demo-1`, `booking-demo-1`).
-2. **View Slots**: `GET /api/v1/slots` → Confirm `slot-demo-1` status is `BOOKED`.
-3. **Register Waitlist Candidates**:
-   - `POST /api/v1/waitlist` for Customer A (earlier timestamp).
-   - `POST /api/v1/waitlist` for Customer B (later timestamp).
-4. **Inspect Waitlist Priority**: `GET /api/v1/slots/slot-demo-1/waitlist` → Verify Customer A is Priority 1 (`joined_at` earlier) and Customer B is Priority 2.
-5. **Demonstrate Cancellation**: `POST /api/v1/bookings/booking-demo-1/cancel`.
-   - Verify `booking_status` = `CANCELLED`.
-   - Verify candidate `customer_a_alice` is selected.
-   - Verify a temporary `hold` is generated with 15-minute `expires_at`.
-   - Verify `slot_status` becomes `HELD`.
-6. **Evaluate Hold Expiry**: `POST /api/v1/holds/{hold_id}/check-expiry` → Demonstrates timestamp evaluation returning `is_expired: false` and `status: ACTIVE`.
+1. **Business** logs in and creates a slot.
+2. **Customer A** books it. **Customers B and C** join the waitlist.
+3. **Customer A** cancels. B receives an offer with a countdown.
+4. **B** declines. The offer cascades to C automatically.
+5. **C** accepts. The slot is booked again and the business dashboard shows recovered revenue.
+6. Run the concurrency demo to show exactly one winner among simultaneous acceptances.
+7. Shorten `DEFAULT_HOLD_DURATION_SECONDS` to show automatic expiry.
 
 ---
 
-> CancelFill transforms cancelled capacity into a structured recovery opportunity — connecting available slots with waiting customers while addressing the real engineering challenges of priority, temporary allocation, expiry, and concurrency.
+## 11. Development Process
 
-> **From cancelled slot to recovered booking.**
+The project was built incrementally, with each phase delivering working, tested functionality:
+
+| Phase | Deliverable |
+| :--- | :--- |
+| 1 | Database schema and core APIs |
+| 2 | Waitlist priority and cancellation logic |
+| 3 | Temporary holds and expiry |
+| 4 | Atomic concurrency control and locking |
+| 5 | Background scheduler and cascading offers |
+| 6 | Authentication, business reporting, and frontend |
+
+---
+
+## 12. Known Limitations & Future Work
+
+- **Notifications:** offers are visible only inside the app. Email and SMS integration is planned.
+- **Scheduler scaling:** the in-process scheduler assumes a single instance. Multiple instances would need a distributed lock or a dedicated worker.
+- **Fairness model:** priority is strictly first-come, first-served, with no weighting.
+- **Schema management:** tables are created on startup, and `schema.sql` is a reference only. Migrations (for example Alembic) are planned.
+- **CI/CD:** tests run locally. A CI workflow with a PostgreSQL service container is planned.
+- **Security hardening:** token refresh, rate limiting, and secret management are needed before production use.
+
+---
+
+> **CancelFill** turns cancelled capacity into a structured recovery opportunity while solving the real engineering problems of priority, temporary allocation, expiry, and concurrency.

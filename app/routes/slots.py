@@ -1,4 +1,4 @@
-from datetime import timezone
+from datetime import timezone,datetime
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -26,6 +26,12 @@ def create_slot(
             detail="end_time must be greater than start_time"
         )
 
+    if slot_in.start_time <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_time must be in the future"
+        )
+
     slot = Slot(
         owner_id=current_user.id,
         resource_id=slot_in.resource_id,
@@ -37,10 +43,9 @@ def create_slot(
     db.commit()
     db.refresh(slot)
     return slot
-
 @router.get("", response_model=List[SlotResponse], summary="List all slots")
 def list_slots(db: Session = Depends(get_db)) -> List[Slot]:
-    return db.query(Slot).all()
+    return db.query(Slot).order_by(Slot.start_time.asc(), Slot.id.asc()).all()
 
 @router.get("/{slot_id}", response_model=SlotResponse, summary="Get slot by ID")
 def get_slot(slot_id: str, db: Session = Depends(get_db)) -> Slot:

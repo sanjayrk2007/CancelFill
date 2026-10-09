@@ -1,14 +1,14 @@
 from datetime import datetime, timezone
 from typing import List, Optional
-
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import select,func
 from sqlalchemy.orm import Session
-
 from app.database import get_db
 from app.dependencies import require_customer
-from app.models import Booking, BookingStatus, Hold, HoldStatus, User, WaitlistEntry, WaitlistStatus
-from app.schemas import MyBookingResponse, MyOfferResponse, MyWaitlistEntryResponse, SlotResponse
+from app.models import (
+    Booking, BookingSource, BookingStatus, Hold, HoldStatus, Slot, User, WaitlistEntry, WaitlistStatus
+)
+from app.schemas import CustomerStatsResponse, MyBookingResponse, MyOfferResponse, MyWaitlistEntryResponse, SlotResponse
 from app.services.allocation_service import expire_hold
 
 
@@ -131,3 +131,69 @@ def my_waitlist(
             )
         )
     return responses
+@router.get("/stats", response_model=CustomerStatsResponse, summary="My activity summary")
+def my_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_customer),
+) -> CustomerStatsResponse:
+    now = datetime.now(timezone.utc)
+
+    booking_counts = dict(
+        db.execute(
+            select(Booking.status, func.count(Booking.id))
+            .where(Booking.user_id == current_user.id)
+            .group_by(Booking.status)
+        ).all()
+    )
+    confirmed = int(booking_counts.get(BookingStatus.CONFIRMED.value, 0))
+    cancelled = int(booking_counts.get(BookingStatus.CANCELLED.value, 0))
+
+    upcoming = db.scalar(
+        select(func.count(Booking.id))
+        .join(Slot, Slot.id == Booking.slot_id)
+        .where(
+            Booking.user_id == current_user.id,
+            Booking.status == BookingStatus.CONFIRMED.value,
+            Slot.start_time > now,
+        )
+    ) or 0
+
+    recovered = db.scalar(
+        select(func.count(Booking.id)).where(
+            Booking.user_id == current_user.id,
+            Booking.status == BookingStatus.CONFIRMED.value,
+            Booking.source == BookingSource.RECOVERED.value,
+        )
+    ) or 0
+
+    hold_counts = dict(
+        db.execute(
+            select(Hold.status, func.count(Hold.id))
+            .where(Hold.user_id == current_user.id)
+            .group_by(Hold.status)
+        ).all()
+    )
+    offers_received = int(sum(hold_counts.values()))
+    accepted = int(hold_counts.get(HoldStatus.CONFIRMED.value, 0))
+    declined = int(hold_counts.get(HoldStatus.DECLINED.value, 0))
+    expired = int(hold_counts.get(HoldStatus.EXPIRED.value, 0))
+
+    active_waitlist = db.scalar(
+        select(func.count(WaitlistEntry.id)).where(
+            WaitlistEntry.user_id == current_user.id,
+            WaitlistEntry.status.in_([WaitlistStatus.WAITING.value, WaitlistStatus.OFFERED.value]),
+        )
+    ) or 0
+
+    return CustomerStatsResponse(
+        total_bookings=confirmed + cancelled,
+        upcoming_bookings=int(upcoming),
+        recovered_bookings=int(recovered),
+        cancelled_bookings=cancelled,
+        offers_received=offers_received,
+        offers_accepted=accepted,
+        offers_declined=declined,
+        offers_expired=expired,
+        acceptance_rate=(accepted / offers_received) if offers_received else 0.0,
+        active_waitlist_entries=int(active_waitlist),
+    )

@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from app.schemas import PasswordChange, TokenResponse, UserLogin, UserRegister, UserResponse, UserUpdate
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models import User
-from app.schemas import TokenResponse, UserLogin, UserRegister, UserResponse
 from app.security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -55,3 +55,28 @@ async def login(request: Request, db: Session = Depends(get_db)) -> TokenRespons
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+@router.patch("/me", response_model=UserResponse)
+def update_me(
+    update_in: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> User:
+    current_user.name = update_in.name
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+@router.post("/change-password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(
+    pw_in: PasswordChange,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    if not verify_password(pw_in.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
+    current_user.password_hash = hash_password(pw_in.new_password)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
