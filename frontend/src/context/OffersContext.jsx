@@ -9,7 +9,7 @@ export function OffersProvider({ children }) {
   const { success, error: toastError } = useToast();
 
   const [offers, setOffers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(user && role === 'CUSTOMER'));
   const [error, setError] = useState(null);
   const [inFlightIds, setInFlightIds] = useState(new Set());
   const inFlightRef = useRef(inFlightIds);
@@ -18,15 +18,9 @@ export function OffersProvider({ children }) {
     inFlightRef.current = inFlightIds;
   }, [inFlightIds]);
 
-  const fetchOffers = useCallback(async (isInitial = false) => {
+  const fetchOffers = useCallback(async () => {
     if (!user || role !== 'CUSTOMER') {
-      setOffers([]);
-      setLoading(false);
       return;
-    }
-
-    if (isInitial) {
-      setLoading(true);
     }
 
     try {
@@ -35,33 +29,26 @@ export function OffersProvider({ children }) {
       setError(null);
     } catch (err) {
       console.error('Failed to fetch offers:', err);
-      // Only set UI error if initial fetch failed
-      if (isInitial) {
-        setError(err.response?.data?.detail || 'Failed to fetch active offers.');
-      }
+      setError(err.response?.data?.detail || 'Failed to fetch active offers.');
     } finally {
-      if (isInitial) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, [user, role]);
 
   // Polling every 5 seconds for CUSTOMER
   useEffect(() => {
     if (!user || role !== 'CUSTOMER') {
-      setOffers([]);
-      setLoading(false);
       return;
     }
 
     let isSubscribed = true;
 
-    // Initial fetch
-    fetchOffers(true);
+    // Initial fetch (async)
+    fetchOffers();
 
     const intervalId = setInterval(() => {
       if (isSubscribed) {
-        fetchOffers(false);
+        fetchOffers();
       }
     }, 5000);
 
@@ -81,12 +68,12 @@ export function OffersProvider({ children }) {
     try {
       const response = await client.post(`/api/v1/holds/${offerId}/accept`);
       success('Offer accepted! Your booking has been confirmed.');
-      await fetchOffers(false);
+      await fetchOffers();
       return response.data;
     } catch (err) {
       if (err.response && err.response.status === 409) {
         toastError('This offer is no longer available');
-        await fetchOffers(false);
+        await fetchOffers();
       } else {
         const msg = err.response?.data?.detail || 'Failed to accept offer.';
         toastError(msg);
@@ -111,12 +98,12 @@ export function OffersProvider({ children }) {
     try {
       const response = await client.post(`/api/v1/holds/${offerId}/decline`);
       success('Offer declined.');
-      await fetchOffers(false);
+      await fetchOffers();
       return response.data;
     } catch (err) {
       if (err.response && err.response.status === 409) {
         toastError('This offer is no longer available');
-        await fetchOffers(false);
+        await fetchOffers();
       } else {
         const msg = err.response?.data?.detail || 'Failed to decline offer.';
         toastError(msg);
@@ -132,12 +119,15 @@ export function OffersProvider({ children }) {
   }, [fetchOffers, success, toastError]);
 
   const value = {
-    offers,
-    activeOffersCount: offers.length,
+    offers: user && role === 'CUSTOMER' ? offers : [],
+    activeOffersCount: user && role === 'CUSTOMER' ? offers.length : 0,
     loading,
     error,
     inFlightIds,
-    refreshOffers: () => fetchOffers(false),
+    refreshOffers: () => {
+      setLoading(true);
+      fetchOffers();
+    },
     acceptOffer,
     declineOffer,
   };

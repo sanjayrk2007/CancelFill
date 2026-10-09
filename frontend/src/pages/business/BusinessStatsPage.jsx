@@ -1,324 +1,284 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import client from '../../api/client';
-import { Card, CardContent } from '../../components/ui/Card';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
+import Card from '../../components/ui/Card';
+import StatCard from '../../components/ui/StatCard';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import Spinner from '../../components/ui/Spinner';
-import { formatCurrency } from '../../lib/formatters';
+import EmptyState from '../../components/ui/EmptyState';
+import { SkeletonCard, SkeletonTable } from '../../components/ui/Skeleton';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
+import { formatCurrency, formatLocalDateTime } from '../../lib/formatters';
 import {
-  DollarSign,
-  CheckCircle2,
-  Zap,
-  Activity,
-  Layers,
   RotateCw,
   AlertCircle,
-  Mail,
-  CheckCheck,
-  XCircle,
-  Timer,
-  ArrowRight,
+  Sparkles,
+  TrendingUp,
+  CheckCircle,
+  Clock,
+  Calendar,
 } from 'lucide-react';
 
 export default function BusinessStatsPage() {
+  useDocumentTitle('Business Analytics');
+
   const [stats, setStats] = useState(null);
+  const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
-  const [lastUpdated, setLastUpdated] = useState(null);
 
-  const fetchStats = useCallback(async (isInitial = false) => {
-    if (isInitial) {
-      setLoading(true);
-    } else {
+  const fetchStatsAndBookings = useCallback(async (isRefresh = false) => {
+    if (isRefresh) {
       setIsRefreshing(true);
     }
     setError(null);
 
     try {
-      const response = await client.get('/api/v1/business/stats');
-      setStats(response.data);
-      setLastUpdated(new Date());
+      const [statsRes, bookingsRes] = await Promise.all([
+        client.get('/api/v1/business/stats'),
+        client.get('/api/v1/business/bookings'),
+      ]);
+      setStats(statsRes.data);
+      setBookings(bookingsRes.data || []);
     } catch (err) {
-      console.error('Error fetching business stats:', err);
+      console.error('Error fetching business analytics:', err);
       setError(err.response?.data?.detail || 'Failed to load business recovery statistics.');
     } finally {
-      if (isInitial) {
-        setLoading(false);
-      } else {
-        setIsRefreshing(false);
-      }
+      setLoading(false);
+      setIsRefreshing(false);
     }
   }, []);
 
-  // Poll every 10 seconds
+  // Poll every 10 seconds without synchronous setState on mount
   useEffect(() => {
-    fetchStats(true);
+    fetchStatsAndBookings(false);
 
     const intervalId = setInterval(() => {
-      fetchStats(false);
+      fetchStatsAndBookings(false);
     }, 10000);
 
     return () => clearInterval(intervalId);
-  }, [fetchStats]);
+  }, [fetchStatsAndBookings]);
 
-  const conversionPercentage = stats
-    ? ((stats.conversion_rate || 0) * 100).toFixed(1)
-    : '0.0';
+  const conversionPercentage = useMemo(() => {
+    if (!stats) return '0.0';
+    return ((stats.conversion_rate || 0) * 100).toFixed(1);
+  }, [stats]);
 
-  const utilizationPercentage = stats
-    ? ((stats.utilization_rate || 0) * 100).toFixed(1)
-    : '0.0';
+  const utilizationPercentage = useMemo(() => {
+    if (!stats) return '0.0';
+    return ((stats.utilization_rate || 0) * 100).toFixed(1);
+  }, [stats]);
+
+  // Recent recoveries from existing bookings data
+  const recentRecoveries = useMemo(() => {
+    return bookings.filter(
+      (b) => b.source === 'RECOVERED' || Boolean(b.recovered_from_booking_id)
+    );
+  }, [bookings]);
 
   return (
     <div className="space-y-8">
       {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800/60">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Business Recovery Dashboard
-            </h1>
-            <Badge status="BUSINESS">P6 METRICS</Badge>
-          </div>
-          <p className="text-sm text-slate-400">
-            Real-time cancellation recovery impact, revenue preservation, and waitlist offer conversion.
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900">
+            Business Analytics
+          </h1>
+          <p className="text-xs text-zinc-500 mt-1">
+            Real-time cancellation recovery impact, revenue preservation, and waitlist conversion.
           </p>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Live 10s auto-refresh indicator */}
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>Auto-refreshing (10s)</span>
+          <div className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-md bg-zinc-100 text-[11px] text-zinc-600 font-medium">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            <span>Live polling (10s)</span>
           </div>
 
           <Button
             variant="secondary"
             size="sm"
-            onClick={() => fetchStats(false)}
+            onClick={() => fetchStatsAndBookings(true)}
             icon={RotateCw}
             isLoading={isRefreshing}
             disabled={loading}
+            aria-label="Refresh stats"
           >
             Refresh
           </Button>
         </div>
       </div>
 
-      {/* Error State */}
+      {/* Inline Error State with Retry */}
       {error && (
-        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />
-            <span className="text-sm font-medium">{error}</span>
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+            <span className="text-xs font-medium">{error}</span>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => fetchStats(true)}>
+          <Button variant="secondary" size="sm" onClick={() => fetchStatsAndBookings(true)}>
             Retry
           </Button>
         </div>
       )}
 
-      {/* Loading State */}
       {loading ? (
-        <div className="min-h-[350px] flex flex-col items-center justify-center gap-3 p-12 border border-slate-800/80 rounded-2xl bg-slate-900/30">
-          <Spinner size="lg" />
-          <p className="text-sm text-slate-400">Loading business analytics & recovery KPIs...</p>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <SkeletonCard count={4} />
+          </div>
+          <SkeletonTable rows={4} cols={4} />
         </div>
       ) : stats ? (
         <>
-          {/* 1. PRIMARY KPI CARDS */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          {/* 1. 4 STAT CARDS (Stripe Dashboard KPI cards) */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* KPI 1: Recovered Revenue */}
-            <Card className="relative overflow-hidden border-emerald-500/20 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/20 shadow-xl shadow-emerald-950/10 hover:border-emerald-500/40 transition-all">
-              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-emerald-500 to-teal-400" />
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Recovered Revenue
-                </span>
-                <div className="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-sm">
-                  <DollarSign className="w-5 h-5" />
-                </div>
-              </div>
-              <div className="text-3xl font-extrabold text-white tracking-tight">
-                {formatCurrency(stats.recovered_revenue)}
-              </div>
-              <p className="text-xs text-emerald-400/90 mt-2 font-medium">
-                Earnings saved by auto-filling cancellations
-              </p>
-            </Card>
+            <StatCard
+              label="Recovered Revenue"
+              value={formatCurrency(stats.recovered_revenue)}
+              hint="Revenue saved by auto-filling cancellations"
+              icon={TrendingUp}
+            />
 
             {/* KPI 2: Recovered Bookings */}
-            <Card className="relative overflow-hidden border-indigo-500/20 bg-gradient-to-br from-slate-900 via-slate-900 to-indigo-950/20 shadow-xl shadow-indigo-950/10 hover:border-indigo-500/40 transition-all">
-              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-indigo-500 to-violet-400" />
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Recovered Bookings
-                </span>
-                <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-sm">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-              </div>
-              <div className="text-3xl font-extrabold text-white tracking-tight">
-                {stats.recovered_bookings}
-              </div>
-              <p className="text-xs text-indigo-300/90 mt-2 font-medium">
-                Cancelled slots re-filled from waitlist
-              </p>
-            </Card>
+            <StatCard
+              label="Recovered Bookings"
+              value={stats.recovered_bookings}
+              hint="Cancelled slots re-filled from waitlist"
+              icon={CheckCircle}
+            />
 
             {/* KPI 3: Conversion Rate */}
-            <Card className="relative overflow-hidden border-purple-500/20 bg-gradient-to-br from-slate-900 via-slate-900 to-purple-950/20 shadow-xl shadow-purple-950/10 hover:border-purple-500/40 transition-all">
-              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-purple-500 to-pink-400" />
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Conversion Rate
-                </span>
-                <div className="w-9 h-9 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 shadow-sm">
-                  <Zap className="w-5 h-5" />
-                </div>
-              </div>
-              <div className="text-3xl font-extrabold text-white tracking-tight">
-                {conversionPercentage}%
-              </div>
-              <p className="text-xs text-purple-300/90 mt-2 font-medium">
-                {stats.offers_accepted} accepted of {stats.offers_made} offers made
-              </p>
-            </Card>
+            <StatCard
+              label="Conversion Rate"
+              value={`${conversionPercentage}%`}
+              hint={`${stats.offers_accepted} accepted of ${stats.offers_made} offers`}
+              icon={Sparkles}
+            />
 
             {/* KPI 4: Slot Utilization */}
-            <Card className="relative overflow-hidden border-sky-500/20 bg-gradient-to-br from-slate-900 via-slate-900 to-sky-950/20 shadow-xl shadow-sky-950/10 hover:border-sky-500/40 transition-all">
-              <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-sky-500 to-cyan-400" />
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  Slot Utilization
-                </span>
-                <div className="w-9 h-9 rounded-xl bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shadow-sm">
-                  <Activity className="w-5 h-5" />
-                </div>
-              </div>
-              <div className="text-3xl font-extrabold text-white tracking-tight">
-                {utilizationPercentage}%
-              </div>
-              <p className="text-xs text-sky-300/90 mt-2 font-medium">
-                {stats.booked_slots} booked of {stats.total_slots} total slots
-              </p>
-            </Card>
+            <StatCard
+              label="Slot Utilization"
+              value={`${utilizationPercentage}%`}
+              hint={`${stats.booked_slots} booked of ${stats.total_slots} total slots`}
+              icon={Calendar}
+            />
           </div>
 
-          {/* 2. SMALL ROW OF COUNTS (OFFERS FUNNEL) */}
+          {/* 2. ROW OF OFFER COUNTS */}
+          <div className="space-y-3">
+            <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+              Hold Offers Overview
+            </h2>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <Card className="p-4">
+                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider block">
+                  Offers Made
+                </span>
+                <span className="text-xl font-bold text-zinc-900 mt-1 block">
+                  {stats.offers_made}
+                </span>
+              </Card>
+
+              <Card className="p-4">
+                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider block">
+                  Offers Accepted
+                </span>
+                <span className="text-xl font-bold text-zinc-900 mt-1 block">
+                  {stats.offers_accepted}
+                </span>
+              </Card>
+
+              <Card className="p-4">
+                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider block">
+                  Offers Declined
+                </span>
+                <span className="text-xl font-bold text-zinc-900 mt-1 block">
+                  {stats.offers_declined}
+                </span>
+              </Card>
+
+              <Card className="p-4">
+                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider block">
+                  Offers Expired
+                </span>
+                <span className="text-xl font-bold text-zinc-900 mt-1 block">
+                  {stats.offers_expired}
+                </span>
+              </Card>
+            </div>
+          </div>
+
+          {/* 3. RECENT RECOVERIES LIST (From existing bookings data) */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                <span>Hold Offers Summary</span>
-              </h3>
-              {lastUpdated && (
-                <span className="text-[11px] text-slate-500">
-                  Last updated: {lastUpdated.toLocaleTimeString()}
-                </span>
-              )}
+              <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                Recent Cancellation Recoveries
+              </h2>
+              <span className="text-xs text-zinc-500">
+                {recentRecoveries.length} total recovered
+              </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {/* Offers Made */}
-              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700/60 flex items-center justify-center text-slate-300">
-                    <Mail className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-medium text-slate-400 block">Offers Made</span>
-                    <span className="text-2xl font-bold text-white">{stats.offers_made}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Offers Accepted */}
-              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                    <CheckCheck className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-medium text-slate-400 block">Offers Accepted</span>
-                    <span className="text-2xl font-bold text-emerald-300">{stats.offers_accepted}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Offers Declined */}
-              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400">
-                    <XCircle className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-medium text-slate-400 block">Offers Declined</span>
-                    <span className="text-2xl font-bold text-rose-300">{stats.offers_declined}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Offers Expired */}
-              <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
-                    <Timer className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-medium text-slate-400 block">Offers Expired</span>
-                    <span className="text-2xl font-bold text-amber-300">{stats.offers_expired}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+            {recentRecoveries.length === 0 ? (
+              <EmptyState
+                icon={Clock}
+                title="No recoveries recorded yet"
+                description="When cancellations occur and are accepted by waitlist candidates, recovered appointments will be listed here."
+              />
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow hover={false}>
+                    <TableHead>Customer</TableHead>
+                    <TableHead>Slot ID</TableHead>
+                    <TableHead>Recovered Value</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Recovery Source</TableHead>
+                    <TableHead align="right">Booked Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {recentRecoveries.map((recovery) => (
+                    <TableRow key={recovery.id}>
+                      <TableCell>
+                        <span className="font-medium text-zinc-900">
+                          {recovery.holder_name || 'Customer'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-mono text-zinc-500 text-xs">
+                          {recovery.slot_id}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="font-semibold text-zinc-900">
+                          {formatCurrency(recovery.slot_price)}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge status={recovery.status} size="sm" />
+                      </TableCell>
+                      <TableCell>
+                        <Badge status="RECOVERED" size="sm">
+                          Recovered from waitlist
+                        </Badge>
+                      </TableCell>
+                      <TableCell align="right">
+                        <span className="text-zinc-600 text-xs">
+                          {formatLocalDateTime(recovery.booked_at)}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </div>
-
-          {/* 3. CAPACITY & QUICK ACTIONS SUMMARY */}
-          <Card className="border-slate-800 bg-slate-900/80">
-            <CardContent className="pt-6">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 flex-1">
-                  <div>
-                    <span className="text-xs text-slate-400 uppercase tracking-wider block font-semibold">
-                      Total Slots Published
-                    </span>
-                    <span className="text-xl font-bold text-white mt-1 block">
-                      {stats.total_slots}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-xs text-slate-400 uppercase tracking-wider block font-semibold">
-                      Currently Booked
-                    </span>
-                    <span className="text-xl font-bold text-indigo-300 mt-1 block">
-                      {stats.booked_slots}
-                    </span>
-                  </div>
-
-                  <div>
-                    <span className="text-xs text-slate-400 uppercase tracking-wider block font-semibold">
-                      Total Cancellations Logged
-                    </span>
-                    <span className="text-xl font-bold text-rose-300 mt-1 block">
-                      {stats.cancellations}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="border-t sm:border-t-0 sm:border-l border-slate-800 pt-4 sm:pt-0 sm:pl-6 flex items-center">
-                  <Link to="/business/slots">
-                    <Button variant="primary" size="md" icon={Layers}>
-                      <span>Manage Slots</span>
-                      <ArrowRight className="w-4 h-4 ml-1" />
-                    </Button>
-                  </Link>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
         </>
       ) : null}
     </div>

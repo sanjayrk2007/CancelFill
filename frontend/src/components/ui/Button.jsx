@@ -1,4 +1,5 @@
-import Spinner from './Spinner';
+import { Loader2 } from 'lucide-react';
+import { cn } from '../../lib/utils';
 
 export default function Button({
   children,
@@ -13,27 +14,28 @@ export default function Button({
   ...props
 }) {
   const baseStyles =
-    'inline-flex items-center justify-center font-medium rounded-xl transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:opacity-50 disabled:cursor-not-allowed select-none active:scale-[0.98] cursor-pointer';
+    'inline-flex items-center justify-center font-medium rounded-lg transition-colors cursor-pointer select-none disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2';
 
   const variants = {
     primary:
-      'bg-gradient-to-r from-indigo-500 to-indigo-600 hover:from-indigo-400 hover:to-indigo-500 text-white shadow-lg shadow-indigo-500/25 focus:ring-indigo-500 border border-indigo-400/30 hover:shadow-indigo-500/40',
+      'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-xs focus-visible:ring-blue-600 focus-visible:ring-offset-white border border-transparent',
     secondary:
-      'bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700/80 shadow-sm focus:ring-slate-500 hover:border-slate-600',
-    outline:
-      'bg-transparent hover:bg-slate-800/60 text-slate-300 hover:text-white border border-slate-700 focus:ring-slate-500 hover:border-slate-500',
-    danger:
-      'bg-gradient-to-r from-rose-600 to-rose-700 hover:from-rose-500 hover:to-rose-600 text-white shadow-lg shadow-rose-600/20 focus:ring-rose-500 border border-rose-500/30',
+      'bg-white hover:bg-zinc-50 active:bg-zinc-100 text-zinc-900 border border-zinc-200 shadow-xs focus-visible:ring-zinc-400 focus-visible:ring-offset-white',
     ghost:
-      'bg-transparent hover:bg-slate-850 text-slate-300 hover:text-white focus:ring-slate-600',
+      'bg-transparent hover:bg-zinc-100 active:bg-zinc-200 text-zinc-700 hover:text-zinc-900 focus-visible:ring-zinc-400 focus-visible:ring-offset-white border border-transparent',
+    danger:
+      'bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white shadow-xs focus-visible:ring-rose-600 focus-visible:ring-offset-white border border-transparent',
+    outline:
+      'bg-white hover:bg-zinc-50 active:bg-zinc-100 text-zinc-900 border border-zinc-200 shadow-xs focus-visible:ring-zinc-400 focus-visible:ring-offset-white',
+    // Fallback for previous variants
     emerald:
-      'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-600/20 focus:ring-emerald-500 border border-emerald-500/30',
+      'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white shadow-xs focus-visible:ring-blue-600 focus-visible:ring-offset-white border border-transparent',
   };
 
   const sizes = {
-    sm: 'text-xs px-3 py-1.5 gap-1.5 font-medium',
-    md: 'text-sm px-4 py-2.5 gap-2',
-    lg: 'text-base px-6 py-3.5 gap-2.5 font-semibold',
+    sm: 'text-xs px-2.5 py-1.5 gap-1.5 h-8',
+    md: 'text-sm px-3.5 py-2 gap-2 h-9',
+    lg: 'text-sm px-4 py-2.5 gap-2 h-10 font-semibold',
   };
 
   return (
@@ -41,12 +43,12 @@ export default function Button({
       type={type}
       disabled={disabled || isLoading}
       onClick={onClick}
-      className={`${baseStyles} ${variants[variant] || variants.primary} ${sizes[size] || sizes.md} ${className}`}
+      className={cn(baseStyles, variants[variant] || variants.primary, sizes[size] || sizes.md, className)}
       {...props}
     >
       {isLoading ? (
         <>
-          <Spinner size="sm" className="shrink-0" />
+          <Loader2 className="w-4 h-4 animate-spin shrink-0" />
           <span>{children}</span>
         </>
       ) : (

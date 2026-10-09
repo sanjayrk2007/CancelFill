@@ -2,11 +2,13 @@ import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/useAuth';
 import { useToast } from '../context/useToast';
+import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import Button from '../components/ui/Button';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/Card';
-import { Sparkles, Mail, Lock, User, Briefcase, Check } from 'lucide-react';
+import { Mail, Lock, User, Building2, CheckCircle2, ArrowRight } from 'lucide-react';
 
 export default function Register() {
+  useDocumentTitle('Create Account');
+
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,14 +22,14 @@ export default function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!name || !email || !password) {
-      error('Please complete all fields.');
+      error('Please complete all required fields.');
       return;
     }
 
     setIsLoading(true);
     try {
       const user = await register({ email, password, name, role });
-      success(`Welcome to CancelFill, ${user.name}! Account created as ${role}.`);
+      success(`Welcome to CancelFill, ${user.name}. Account created as ${role}.`);
       if (role === 'BUSINESS') {
         navigate('/business/slots', { replace: true });
       } else {
@@ -44,146 +46,204 @@ export default function Register() {
   };
 
   return (
-    <div className="max-w-md mx-auto pt-4 sm:pt-8">
-      <div className="text-center mb-6">
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-500 mb-4 shadow-lg shadow-indigo-600/30 border border-indigo-400/30">
-          <Sparkles className="w-6 h-6 text-white" />
+    <div className="max-w-[1000px] mx-auto py-4 sm:py-8">
+      <div className="bg-white border border-zinc-200 rounded-2xl shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[580px]">
+        {/* Left Brand Panel: 3 steps */}
+        <div className="md:col-span-5 bg-zinc-900 text-zinc-100 p-8 sm:p-10 flex flex-col justify-between border-b md:border-b-0 md:border-r border-zinc-800">
+          <div>
+            <div className="flex items-center gap-2 mb-8">
+              <div className="w-6 h-6 rounded-md bg-blue-600 flex items-center justify-center text-white text-xs font-bold">
+                C
+              </div>
+              <span className="font-semibold text-white tracking-tight">CancelFill</span>
+            </div>
+
+            <h2 className="text-xl sm:text-2xl font-semibold tracking-tight text-white mb-3">
+              Automated recovery for appointment schedules
+            </h2>
+            <p className="text-xs text-zinc-400 leading-relaxed mb-8">
+              Join CancelFill to manage priority waitlists, fill unexpected openings, and preserve revenue.
+            </p>
+
+            <div className="space-y-6">
+              <div className="flex items-start gap-3.5">
+                <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-xs font-semibold text-zinc-300 shrink-0 mt-0.5">
+                  1
+                </div>
+                <div>
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+                    Cancellation
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                    A booked slot opens up unexpectedly when an existing client cancels.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3.5">
+                <div className="w-6 h-6 rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center text-xs font-semibold text-zinc-300 shrink-0 mt-0.5">
+                  2
+                </div>
+                <div>
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+                    Offer
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                    A temporary hold is immediately dispatched to the next customer in the waitlist queue.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3.5">
+                <div className="w-6 h-6 rounded-full bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-xs font-semibold text-blue-400 shrink-0 mt-0.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-semibold text-white uppercase tracking-wider">
+                    Confirmed
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                    The waitlist candidate accepts before the timer expires, recovering the opening.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 pt-6 border-t border-zinc-800 text-[11px] text-zinc-500">
+            Intelligent capacity reservation engine
+          </div>
         </div>
-        <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-          Create an Account
-        </h1>
-        <p className="text-sm text-slate-400 mt-2">
-          Join CancelFill as a Customer or Business Provider
-        </p>
-      </div>
 
-      <Card className="border-slate-800 bg-slate-900/90 shadow-2xl">
-        <CardHeader>
-          <CardTitle>Registration Details</CardTitle>
-          <CardDescription>Select your account type and fill in your details</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Role selector */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Select Your Role
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  type="button"
-                  onClick={() => setRole('CUSTOMER')}
-                  className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col gap-1 cursor-pointer ${
-                    role === 'CUSTOMER'
-                      ? 'bg-indigo-600/15 border-indigo-500/80 text-white ring-1 ring-indigo-500/40 shadow-sm'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                  }`}
+        {/* Right Panel: Registration Form */}
+        <div className="md:col-span-7 p-8 sm:p-12 flex flex-col justify-center bg-white">
+          <div className="max-w-md w-full mx-auto">
+            <div className="mb-6">
+              <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
+                Create an account
+              </h1>
+              <p className="text-xs text-zinc-500 mt-1">
+                Choose your account type and fill in your details to get started.
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* Role selection tabs */}
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  Account Type
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRole('CUSTOMER')}
+                    className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex items-center gap-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+                      role === 'CUSTOMER'
+                        ? 'border-blue-600 bg-blue-50/40 text-blue-900 ring-1 ring-blue-600'
+                        : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+                    }`}
+                  >
+                    <User className={`w-4 h-4 ${role === 'CUSTOMER' ? 'text-blue-600' : 'text-zinc-500'}`} />
+                    <div>
+                      <div className="text-xs font-semibold">Customer</div>
+                      <div className="text-[10px] text-zinc-500">Book & waitlist slots</div>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setRole('BUSINESS')}
+                    className={`p-3 rounded-lg border text-left transition-all cursor-pointer flex items-center gap-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 ${
+                      role === 'BUSINESS'
+                        ? 'border-blue-600 bg-blue-50/40 text-blue-900 ring-1 ring-blue-600'
+                        : 'border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+                    }`}
+                  >
+                    <Building2 className={`w-4 h-4 ${role === 'BUSINESS' ? 'text-blue-600' : 'text-zinc-500'}`} />
+                    <div>
+                      <div className="text-xs font-semibold">Business</div>
+                      <div className="text-[10px] text-zinc-500">Manage slots & revenue</div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  Full Name
+                </label>
+                <div className="relative">
+                  <User className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Alice Smith"
+                    className="w-full bg-white border border-zinc-200 rounded-lg pl-9 pr-3.5 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  Email Address
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="w-full bg-white border border-zinc-200 rounded-lg pl-9 pr-3.5 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  Password
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="At least 6 characters"
+                    className="w-full bg-white border border-zinc-200 rounded-lg pl-9 pr-3.5 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+                  />
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                variant="primary"
+                size="md"
+                isLoading={isLoading}
+                className="w-full mt-2"
+              >
+                <span>Complete Registration</span>
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </form>
+
+            <div className="mt-6 text-center">
+              <p className="text-xs text-zinc-500">
+                Already have an account?{' '}
+                <Link
+                  to="/login"
+                  className="font-medium text-blue-600 hover:text-blue-700 hover:underline"
                 >
-                  <div className="flex items-center justify-between">
-                    <User className={`w-4 h-4 ${role === 'CUSTOMER' ? 'text-indigo-400' : 'text-slate-400'}`} />
-                    {role === 'CUSTOMER' && <Check className="w-3.5 h-3.5 text-indigo-400" />}
-                  </div>
-                  <span className="font-semibold text-sm mt-1">Customer</span>
-                  <span className="text-[11px] text-slate-400 leading-tight">
-                    Browse slots, join waitlists, accept holds
-                  </span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setRole('BUSINESS')}
-                  className={`p-3.5 rounded-xl border text-left transition-all relative flex flex-col gap-1 cursor-pointer ${
-                    role === 'BUSINESS'
-                      ? 'bg-indigo-600/15 border-indigo-500/80 text-white ring-1 ring-indigo-500/40 shadow-sm'
-                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <Briefcase className={`w-4 h-4 ${role === 'BUSINESS' ? 'text-indigo-400' : 'text-slate-400'}`} />
-                    {role === 'BUSINESS' && <Check className="w-3.5 h-3.5 text-indigo-400" />}
-                  </div>
-                  <span className="font-semibold text-sm mt-1">Business</span>
-                  <span className="text-[11px] text-slate-400 leading-tight">
-                    Manage capacity, recover revenue, track stats
-                  </span>
-                </button>
-              </div>
+                  Sign in here
+                </Link>
+              </p>
             </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Full Name
-              </label>
-              <div className="relative">
-                <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Alice Smith"
-                  className="w-full bg-slate-950/70 border border-slate-700/80 rounded-xl px-10 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Email Address
-              </label>
-              <div className="relative">
-                <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full bg-slate-950/70 border border-slate-700/80 rounded-xl px-10 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="At least 6 characters"
-                  className="w-full bg-slate-950/70 border border-slate-700/80 rounded-xl px-10 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all"
-                />
-              </div>
-            </div>
-
-            <Button
-              type="submit"
-              variant="primary"
-              size="lg"
-              isLoading={isLoading}
-              className="w-full mt-2"
-            >
-              Complete Registration
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
-
-      <div className="text-center mt-6">
-        <p className="text-sm text-slate-400">
-          Already have an account?{' '}
-          <Link
-            to="/login"
-            className="text-indigo-400 hover:text-indigo-300 font-semibold underline underline-offset-4 decoration-indigo-500/40 hover:decoration-indigo-400"
-          >
-            Sign in here
-          </Link>
-        </p>
+          </div>
+        </div>
       </div>
     </div>
   );

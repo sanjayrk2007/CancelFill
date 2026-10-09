@@ -1,36 +1,41 @@
 import { useState, useEffect, useCallback, Fragment } from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import client from '../../api/client';
 import { useToast } from '../../context/useToast';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
+import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
-import Spinner from '../../components/ui/Spinner';
+import Countdown from '../../components/ui/Countdown';
 import EmptyState from '../../components/ui/EmptyState';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
-import { formatLocalDateTime, formatLocalTimeRange, formatCurrency, formatRemainingSeconds } from '../../lib/formatters';
+import { SkeletonTable } from '../../components/ui/Skeleton';
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
+import { formatLocalDateTime, formatLocalTimeRange, formatCurrency } from '../../lib/formatters';
 import {
-  Layers,
-  PlusCircle,
+  Plus,
+  RotateCw,
+  AlertCircle,
+  MoreHorizontal,
+  X,
   Users,
   ChevronDown,
   ChevronUp,
-  XCircle,
-  RotateCw,
-  AlertCircle,
-  User,
-  Timer,
 } from 'lucide-react';
 
 export default function BusinessSlotsPage() {
+  useDocumentTitle('Business Slots');
+
   const [slots, setSlots] = useState([]);
   const [waitlistMap, setWaitlistMap] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Expanded rows set
+  // Expanded rows set for waitlist preview
   const [expandedSlotIds, setExpandedSlotIds] = useState(new Set());
 
-  // Form state
+  // Create Slot Dialog state
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [formData, setFormData] = useState({
     resource_id: '',
     start_time: '',
@@ -40,24 +45,16 @@ export default function BusinessSlotsPage() {
   const [formErrors, setFormErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Cancel dialog state
+  // Cancel booking target state
   const [cancelTargetSlot, setCancelTargetSlot] = useState(null);
   const [isCancelling, setIsCancelling] = useState(false);
 
-  // Live timer tick for HELD countdowns
-  const [currentTime, setCurrentTime] = useState(() => Date.now());
-
   const { success, error: toastError } = useToast();
 
-  useEffect(() => {
-    const timerId = setInterval(() => {
-      setCurrentTime(Date.now());
-    }, 1000);
-    return () => clearInterval(timerId);
-  }, []);
-
   const fetchData = useCallback(async (isRefresh = false) => {
-    if (!isRefresh) setLoading(true);
+    if (isRefresh) {
+      setLoading(true);
+    }
     setError(null);
     try {
       const [slotsRes, waitlistRes] = await Promise.all([
@@ -66,7 +63,6 @@ export default function BusinessSlotsPage() {
       ]);
       setSlots(slotsRes.data || []);
 
-      // Index waitlist by slot_id
       const map = {};
       (waitlistRes.data || []).forEach((w) => {
         map[w.slot_id] = w.entries || [];
@@ -81,10 +77,9 @@ export default function BusinessSlotsPage() {
   }, []);
 
   useEffect(() => {
-    fetchData();
+    fetchData(false);
   }, [fetchData]);
 
-  // Parse API 422 validation errors
   const parseValidationErrors = (err) => {
     const fieldErrors = {};
     let generalMessage = 'Validation failed. Please correct the fields below.';
@@ -114,7 +109,6 @@ export default function BusinessSlotsPage() {
 
   const handleInputChange = (field, value) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
-    // Clear error for that field
     if (formErrors[field] || formErrors.general) {
       setFormErrors((prev) => {
         const next = { ...prev };
@@ -131,7 +125,6 @@ export default function BusinessSlotsPage() {
     setFormErrors({});
 
     try {
-      // Format timestamps to ISO UTC
       const startIso = formData.start_time ? new Date(formData.start_time).toISOString() : '';
       const endIso = formData.end_time ? new Date(formData.end_time).toISOString() : '';
       const priceNum = formData.price === '' ? 0 : parseFloat(formData.price);
@@ -143,13 +136,14 @@ export default function BusinessSlotsPage() {
         price: isNaN(priceNum) ? 0 : priceNum,
       });
 
-      success(`Slot for "${formData.resource_id}" created successfully!`);
+      success(`Slot for "${formData.resource_id}" published successfully.`);
       setFormData({
         resource_id: '',
         start_time: '',
         end_time: '',
         price: '',
       });
+      setCreateDialogOpen(false);
       await fetchData(true);
     } catch (err) {
       const { fieldErrors, generalMessage } = parseValidationErrors(err);
@@ -178,7 +172,7 @@ export default function BusinessSlotsPage() {
     try {
       const res = await client.post(`/api/v1/bookings/${cancelTargetSlot.active_booking_id}/cancel`);
       const msg = res.data?.candidate_selected
-        ? 'Booking cancelled. Waitlist candidate has been automatically offered a temporary hold!'
+        ? 'Booking cancelled. Waitlist candidate has been automatically offered a temporary hold.'
         : 'Booking cancelled successfully.';
       success(msg);
       setCancelTargetSlot(null);
@@ -191,18 +185,15 @@ export default function BusinessSlotsPage() {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-slate-800/60">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200">
         <div>
-          <div className="flex items-center gap-2 mb-1">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">
-              Resource Slot Management
-            </h1>
-            <Badge status="BUSINESS">BUSINESS</Badge>
-          </div>
-          <p className="text-sm text-slate-400">
-            Publish time slots, monitor live status and holders, cancel bookings to trigger recovery, and inspect waitlists.
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900">
+            Resource Slots
+          </h1>
+          <p className="text-xs text-zinc-500 mt-1">
+            Publish openings, inspect holders, and monitor automated cancellation holds.
           </p>
         </div>
 
@@ -213,50 +204,294 @@ export default function BusinessSlotsPage() {
             onClick={() => fetchData(true)}
             icon={RotateCw}
             disabled={loading}
+            aria-label="Refresh slots"
           >
             Refresh
+          </Button>
+
+          <Button
+            variant="primary"
+            size="sm"
+            icon={Plus}
+            onClick={() => setCreateDialogOpen(true)}
+          >
+            Create slot
           </Button>
         </div>
       </div>
 
-      {/* Global Error */}
+      {/* Inline Error State with Retry */}
       {error && (
-        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 shrink-0 text-rose-400" />
-            <span className="text-sm font-medium">{error}</span>
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+            <span className="text-xs font-medium">{error}</span>
           </div>
-          <Button variant="secondary" size="sm" onClick={() => fetchData(false)}>
+          <Button variant="secondary" size="sm" onClick={() => fetchData(true)}>
             Retry
           </Button>
         </div>
       )}
 
-      {/* 1. CREATE SLOT FORM */}
-      <Card className="border-indigo-500/20 bg-slate-900/90 shadow-xl">
-        <CardHeader className="pb-3 border-b border-slate-800/60">
-          <div className="flex items-center gap-2">
-            <PlusCircle className="w-5 h-5 text-indigo-400" />
-            <CardTitle className="text-lg text-white">Create New Time Slot</CardTitle>
-          </div>
-          <CardDescription>
-            Publish a resource slot with local start/end times and price.
-          </CardDescription>
-        </CardHeader>
+      {/* Main Linear-Style Table */}
+      {loading ? (
+        <SkeletonTable rows={6} cols={6} />
+      ) : slots.length === 0 ? (
+        <EmptyState
+          icon={Plus}
+          title="No slots created yet"
+          description="Publish your first resource opening using the Create Slot dialog to start accepting bookings and waitlists."
+          action={
+            <Button variant="primary" size="sm" onClick={() => setCreateDialogOpen(true)}>
+              Create first slot
+            </Button>
+          }
+        />
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow hover={false}>
+              <TableHead>Resource</TableHead>
+              <TableHead>Time Range</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Price</TableHead>
+              <TableHead>Current Holder</TableHead>
+              <TableHead>Offer Holder / Countdown</TableHead>
+              <TableHead align="center">Waitlist</TableHead>
+              <TableHead align="right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {slots.map((slot) => {
+              const isBooked = slot.status === 'BOOKED';
+              const isHeld = slot.status === 'HELD';
+              const isExpanded = expandedSlotIds.has(slot.id);
+              const slotWaitlist = waitlistMap[slot.id] || [];
 
-        <CardContent className="pt-4">
-          {formErrors.general && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-              <span>{formErrors.general}</span>
-            </div>
-          )}
+              return (
+                <Fragment key={slot.id}>
+                  <TableRow>
+                    {/* Resource */}
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-zinc-900">{slot.resource_id}</span>
+                        <span className="text-[11px] text-zinc-400 font-mono">
+                          {slot.id}
+                        </span>
+                      </div>
+                    </TableCell>
 
-          <form onSubmit={handleCreateSlot} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Resource ID */}
+                    {/* Schedule */}
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span className="text-zinc-900 font-medium">
+                          {formatLocalDateTime(slot.start_time)}
+                        </span>
+                        <span className="text-[11px] text-zinc-500">
+                          {formatLocalTimeRange(slot.start_time, slot.end_time)}
+                        </span>
+                      </div>
+                    </TableCell>
+
+                    {/* Status Pill */}
+                    <TableCell>
+                      <Badge status={slot.status} size="sm" />
+                    </TableCell>
+
+                    {/* Price */}
+                    <TableCell>
+                      <span className="font-semibold text-zinc-900">
+                        {formatCurrency(slot.price)}
+                      </span>
+                    </TableCell>
+
+                    {/* Current Holder */}
+                    <TableCell>
+                      {isBooked ? (
+                        <span className="font-medium text-zinc-900">
+                          {slot.active_booking_holder_name || 'Booked Client'}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400">—</span>
+                      )}
+                    </TableCell>
+
+                    {/* Offer Holder with Countdown */}
+                    <TableCell>
+                      {isHeld ? (
+                        <div className="flex flex-col gap-1 max-w-[160px]">
+                          <span className="font-medium text-amber-700 text-xs">
+                            {slot.active_hold_holder_name || 'Candidate'}
+                          </span>
+                          <Countdown
+                            expiresAt={slot.active_hold_expires_at}
+                            totalDurationSeconds={300}
+                            size="sm"
+                          />
+                        </div>
+                      ) : (
+                        <span className="text-zinc-400">—</span>
+                      )}
+                    </TableCell>
+
+                    {/* Waitlist count & toggle */}
+                    <TableCell align="center">
+                      <button
+                        type="button"
+                        onClick={() => toggleExpandSlot(slot.id)}
+                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                          slot.waitlist_count > 0
+                            ? 'bg-zinc-100 text-zinc-800 hover:bg-zinc-200'
+                            : 'text-zinc-400 hover:text-zinc-600'
+                        }`}
+                        title="Toggle waitlist entries"
+                      >
+                        <Users className="w-3.5 h-3.5" />
+                        <span>{slot.waitlist_count}</span>
+                        {isExpanded ? (
+                          <ChevronUp className="w-3 h-3 ml-0.5" />
+                        ) : (
+                          <ChevronDown className="w-3 h-3 ml-0.5" />
+                        )}
+                      </button>
+                    </TableCell>
+
+                    {/* Row Actions Menu: Radix Dropdown */}
+                    <TableCell align="right">
+                      <DropdownMenu.Root>
+                        <DropdownMenu.Trigger asChild>
+                          <button
+                            type="button"
+                            className="p-1.5 rounded-md text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400 cursor-pointer"
+                            aria-label={`Actions for slot ${slot.resource_id}`}
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </button>
+                        </DropdownMenu.Trigger>
+
+                        <DropdownMenu.Portal>
+                          <DropdownMenu.Content
+                            align="end"
+                            sideOffset={4}
+                            className="z-50 min-w-[180px] rounded-lg bg-white p-1 shadow-lg border border-zinc-200 text-xs duration-150 animate-in fade-in-0 zoom-in-95 focus:outline-none"
+                          >
+                            <DropdownMenu.Item
+                              onSelect={() => toggleExpandSlot(slot.id)}
+                              className="px-2.5 py-1.5 rounded-md hover:bg-zinc-100 text-zinc-700 cursor-pointer focus:outline-none focus:bg-zinc-100"
+                            >
+                              {isExpanded ? 'Hide waitlist' : 'View waitlist'}
+                            </DropdownMenu.Item>
+
+                            {isBooked && (
+                              <>
+                                <DropdownMenu.Separator className="h-px bg-zinc-100 my-1" />
+                                <DropdownMenu.Item
+                                  onSelect={() => setCancelTargetSlot(slot)}
+                                  className="px-2.5 py-1.5 rounded-md hover:bg-rose-50 text-rose-600 cursor-pointer focus:outline-none focus:bg-rose-50"
+                                >
+                                  Cancel booking
+                                </DropdownMenu.Item>
+                              </>
+                            )}
+                          </DropdownMenu.Content>
+                        </DropdownMenu.Portal>
+                      </DropdownMenu.Root>
+                    </TableCell>
+                  </TableRow>
+
+                  {/* Expanded Waitlist View */}
+                  {isExpanded && (
+                    <TableRow hover={false} className="bg-zinc-50/70 border-b border-zinc-200">
+                      <td colSpan={8} className="px-6 py-4">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider">
+                              Waitlist queue for {slot.resource_id} ({slotWaitlist.length} candidates)
+                            </span>
+                          </div>
+
+                          {slotWaitlist.length === 0 ? (
+                            <p className="text-xs text-zinc-400 italic">
+                              No candidates currently in the waitlist queue for this slot.
+                            </p>
+                          ) : (
+                            <div className="border border-zinc-200 rounded-lg overflow-hidden bg-white">
+                              <table className="w-full text-xs text-left">
+                                <thead className="bg-zinc-50 border-b border-zinc-100 text-[11px] font-medium text-zinc-500 uppercase">
+                                  <tr>
+                                    <th className="px-3 py-2">Position</th>
+                                    <th className="px-3 py-2">Customer</th>
+                                    <th className="px-3 py-2">Status</th>
+                                    <th className="px-3 py-2">Joined</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-zinc-100">
+                                  {slotWaitlist.map((entry) => (
+                                    <tr key={entry.id} className="hover:bg-zinc-50/60">
+                                      <td className="px-3 py-2 font-bold text-zinc-900">
+                                        #{entry.position || 1}
+                                      </td>
+                                      <td className="px-3 py-2 font-medium text-zinc-900">
+                                        {entry.user_name || entry.user_id}
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <Badge status={entry.status} size="sm" />
+                                      </td>
+                                      <td className="px-3 py-2 text-zinc-500">
+                                        {formatLocalDateTime(entry.joined_at)}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </TableRow>
+                  )}
+                </Fragment>
+              );
+            })}
+          </TableBody>
+        </Table>
+      )}
+
+      {/* CREATE SLOT DIALOG (using @radix-ui/react-dialog) */}
+      <DialogPrimitive.Root open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/30 backdrop-blur-xs animate-in fade-in-0 duration-150" />
+          <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl bg-white p-6 shadow-xl border border-zinc-200 duration-150 animate-in fade-in-0 zoom-in-95 focus:outline-none">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                <DialogPrimitive.Title className="text-base font-semibold text-zinc-900">
+                  Create Time Slot
+                </DialogPrimitive.Title>
+                <DialogPrimitive.Description className="text-xs text-zinc-500 mt-0.5">
+                  Publish a resource opening with start/end time and price.
+                </DialogPrimitive.Description>
+              </div>
+              <DialogPrimitive.Close asChild>
+                <button
+                  type="button"
+                  className="text-zinc-400 hover:text-zinc-600 p-1 rounded-md"
+                  aria-label="Close dialog"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </DialogPrimitive.Close>
+            </div>
+
+            {formErrors.general && (
+              <div className="mt-3 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{formErrors.general}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateSlot} className="mt-4 space-y-3.5">
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1">
                   Resource Name *
                 </label>
                 <input
@@ -264,344 +499,108 @@ export default function BusinessSlotsPage() {
                   required
                   value={formData.resource_id}
                   onChange={(e) => handleInputChange('resource_id', e.target.value)}
-                  placeholder="e.g. Room 101, Dr. Smith"
-                  className={`w-full bg-slate-950/70 border rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${
-                    formErrors.resource_id
-                      ? 'border-rose-500 focus:ring-rose-500/40'
-                      : 'border-slate-700/80 focus:ring-indigo-500/40 focus:border-indigo-500'
-                  }`}
+                  placeholder="e.g. Consultation Room 2"
+                  className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
                 {formErrors.resource_id && (
-                  <p className="mt-1 text-xs text-rose-400">{formErrors.resource_id}</p>
+                  <p className="mt-1 text-xs text-rose-600">{formErrors.resource_id}</p>
                 )}
               </div>
 
-              {/* Start Time */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Start Time *
-                </label>
-                <input
-                  type="datetime-local"
-                  required
-                  value={formData.start_time}
-                  onChange={(e) => handleInputChange('start_time', e.target.value)}
-                  className={`w-full bg-slate-950/70 border rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${
-                    formErrors.start_time
-                      ? 'border-rose-500 focus:ring-rose-500/40'
-                      : 'border-slate-700/80 focus:ring-indigo-500/40 focus:border-indigo-500'
-                  }`}
-                />
-                {formErrors.start_time && (
-                  <p className="mt-1 text-xs text-rose-400">{formErrors.start_time}</p>
-                )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    Start Time *
+                  </label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={formData.start_time}
+                    onChange={(e) => handleInputChange('start_time', e.target.value)}
+                    className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                  {formErrors.start_time && (
+                    <p className="mt-1 text-xs text-rose-600">{formErrors.start_time}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-zinc-700 mb-1">
+                    End Time *
+                  </label>
+                  <input
+                    type="datetime-local"
+                    required
+                    value={formData.end_time}
+                    onChange={(e) => handleInputChange('end_time', e.target.value)}
+                    className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                  {formErrors.end_time && (
+                    <p className="mt-1 text-xs text-rose-600">{formErrors.end_time}</p>
+                  )}
+                </div>
               </div>
 
-              {/* End Time */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  End Time *
-                </label>
-                <input
-                  type="datetime-local"
-                  required
-                  value={formData.end_time}
-                  onChange={(e) => handleInputChange('end_time', e.target.value)}
-                  className={`w-full bg-slate-950/70 border rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${
-                    formErrors.end_time
-                      ? 'border-rose-500 focus:ring-rose-500/40'
-                      : 'border-slate-700/80 focus:ring-indigo-500/40 focus:border-indigo-500'
-                  }`}
-                />
-                {formErrors.end_time && (
-                  <p className="mt-1 text-xs text-rose-400">{formErrors.end_time}</p>
-                )}
-              </div>
-
-              {/* Price */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Price ($ USD)
+                <label className="block text-xs font-medium text-zinc-700 mb-1">
+                  Price (INR ₹)
                 </label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="1"
                   min="0"
                   value={formData.price}
                   onChange={(e) => handleInputChange('price', e.target.value)}
-                  placeholder="50.00"
-                  className={`w-full bg-slate-950/70 border rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 transition-all ${
-                    formErrors.price
-                      ? 'border-rose-500 focus:ring-rose-500/40'
-                      : 'border-slate-700/80 focus:ring-indigo-500/40 focus:border-indigo-500'
-                  }`}
+                  placeholder="1500"
+                  className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
                 {formErrors.price && (
-                  <p className="mt-1 text-xs text-rose-400">{formErrors.price}</p>
+                  <p className="mt-1 text-xs text-rose-600">{formErrors.price}</p>
                 )}
               </div>
-            </div>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <Button
-                type="submit"
-                variant="primary"
-                size="md"
-                isLoading={isSubmitting}
-                icon={PlusCircle}
-              >
-                Create Slot
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+              <div className="mt-6 pt-3 border-t border-zinc-100 flex items-center justify-end gap-2.5">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={isSubmitting}
+                  onClick={() => setCreateDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  isLoading={isSubmitting}
+                >
+                  Publish Slot
+                </Button>
+              </div>
+            </form>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
 
-      {/* 2. SLOTS TABLE */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Layers className="w-5 h-5 text-indigo-400" />
-            <h2 className="text-xl font-bold text-white tracking-tight">Active Slots & Recovery State</h2>
-            <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-              {slots.length}
-            </span>
-          </div>
-        </div>
-
-        {loading ? (
-          <div className="min-h-[300px] flex flex-col items-center justify-center gap-3 p-12 border border-slate-800/80 rounded-2xl bg-slate-900/30">
-            <Spinner size="lg" />
-            <p className="text-sm text-slate-400">Loading your published slots...</p>
-          </div>
-        ) : slots.length === 0 ? (
-          <Card>
-            <CardContent className="pt-6">
-              <EmptyState
-                icon={Layers}
-                title="No Slots Created Yet"
-                description="You have not published any resource slots yet. Use the form above to add your first appointment opening."
-              />
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="border border-slate-800 rounded-2xl bg-slate-900/80 overflow-hidden shadow-xl">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm text-slate-300">
-                <thead className="bg-slate-950/80 text-xs font-semibold uppercase text-slate-400 tracking-wider border-b border-slate-800">
-                  <tr>
-                    <th scope="col" className="px-5 py-3.5">Resource</th>
-                    <th scope="col" className="px-5 py-3.5">Time</th>
-                    <th scope="col" className="px-5 py-3.5">Status</th>
-                    <th scope="col" className="px-5 py-3.5">Price</th>
-                    <th scope="col" className="px-5 py-3.5">Current Holder</th>
-                    <th scope="col" className="px-5 py-3.5 text-center">Waitlist</th>
-                    <th scope="col" className="px-5 py-3.5 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {slots.map((slot) => {
-                    const isBooked = slot.status === 'BOOKED';
-                    const isHeld = slot.status === 'HELD';
-                    const isExpanded = expandedSlotIds.has(slot.id);
-                    const slotWaitlist = waitlistMap[slot.id] || [];
-
-                    // Countdown for HELD slot
-                    let heldCountdown = null;
-                    if (isHeld && slot.active_hold_expires_at) {
-                      const expiresMs = new Date(slot.active_hold_expires_at).getTime();
-                      const secondsRemaining = Math.max(0, Math.floor((expiresMs - currentTime) / 1000));
-                      heldCountdown = formatRemainingSeconds(secondsRemaining);
-                    }
-
-                    return (
-                      <Fragment key={slot.id}>
-                        <tr className="hover:bg-slate-850/50 transition-colors">
-                          {/* Resource */}
-                          <td className="px-5 py-4 font-medium text-white">
-                            <div className="flex flex-col">
-                              <span className="font-semibold text-slate-100">{slot.resource_id}</span>
-                              <span className="text-[11px] text-slate-500 font-mono mt-0.5 truncate max-w-[140px]">
-                                {slot.id}
-                              </span>
-                            </div>
-                          </td>
-
-                          {/* Time */}
-                          <td className="px-5 py-4 text-xs">
-                            <div className="flex flex-col gap-0.5">
-                              <span className="text-slate-200 font-medium">
-                                {formatLocalDateTime(slot.start_time)}
-                              </span>
-                              <span className="text-slate-400 text-[11px]">
-                                {formatLocalTimeRange(slot.start_time, slot.end_time)}
-                              </span>
-                            </div>
-                          </td>
-
-                          {/* Status */}
-                          <td className="px-5 py-4">
-                            <Badge status={slot.status} size="sm" />
-                          </td>
-
-                          {/* Price */}
-                          <td className="px-5 py-4 font-semibold text-emerald-400">
-                            {formatCurrency(slot.price)}
-                          </td>
-
-                          {/* Current Holder & HELD Countdown */}
-                          <td className="px-5 py-4 text-xs">
-                            {isBooked ? (
-                              <div className="flex items-center gap-1.5 text-slate-200">
-                                <User className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                                <span className="font-medium">
-                                  {slot.active_booking_holder_name || 'Booked Customer'}
-                                </span>
-                              </div>
-                            ) : isHeld ? (
-                              <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-1.5 text-amber-300 font-medium">
-                                  <User className="w-3.5 h-3.5 shrink-0" />
-                                  <span>{slot.active_hold_holder_name || 'Candidate'}</span>
-                                </div>
-                                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-mono animate-pulse">
-                                  <Timer className="w-3 h-3 shrink-0" />
-                                  <span>Expires in {heldCountdown || '00:00'}</span>
-                                </div>
-                              </div>
-                            ) : (
-                              <span className="text-slate-500 italic">—</span>
-                            )}
-                          </td>
-
-                          {/* Waitlist count & toggle */}
-                          <td className="px-5 py-4 text-center">
-                            <button
-                              type="button"
-                              onClick={() => toggleExpandSlot(slot.id)}
-                              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
-                                slot.waitlist_count > 0
-                                  ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30 hover:bg-sky-500/25'
-                                  : 'bg-slate-800 text-slate-400 hover:text-slate-200'
-                              }`}
-                              title="Toggle waitlist entries"
-                            >
-                              <Users className="w-3.5 h-3.5" />
-                              <span>{slot.waitlist_count}</span>
-                              {isExpanded ? (
-                                <ChevronUp className="w-3.5 h-3.5 ml-0.5" />
-                              ) : (
-                                <ChevronDown className="w-3.5 h-3.5 ml-0.5" />
-                              )}
-                            </button>
-                          </td>
-
-                          {/* Actions */}
-                          <td className="px-5 py-4 text-right">
-                            {isBooked && (
-                              <Button
-                                variant="danger"
-                                size="sm"
-                                icon={XCircle}
-                                onClick={() => setCancelTargetSlot(slot)}
-                              >
-                                Cancel booking
-                              </Button>
-                            )}
-                          </td>
-                        </tr>
-
-                        {/* Expandable Waitlist Details */}
-                        {isExpanded && (
-                          <tr className="bg-slate-950/60 border-t border-b border-slate-800">
-                            <td colSpan={7} className="px-6 py-4">
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                                    <Users className="w-4 h-4 text-sky-400" />
-                                    <span>Waitlist Queue for {slot.resource_id}</span>
-                                    <span className="text-slate-500 font-normal">
-                                      ({slotWaitlist.length} candidates)
-                                    </span>
-                                  </h4>
-                                </div>
-
-                                {slotWaitlist.length === 0 ? (
-                                  <p className="text-xs text-slate-500 italic py-2">
-                                    No candidates are currently on the waitlist for this slot.
-                                  </p>
-                                ) : (
-                                  <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-900/60">
-                                    <table className="w-full text-left text-xs text-slate-300">
-                                      <thead className="bg-slate-950/80 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                                        <tr>
-                                          <th className="px-4 py-2">Position</th>
-                                          <th className="px-4 py-2">Customer Name</th>
-                                          <th className="px-4 py-2">Status</th>
-                                          <th className="px-4 py-2">Joined At</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-slate-800/50">
-                                        {slotWaitlist.map((entry) => (
-                                          <tr key={entry.id} className="hover:bg-slate-850/40">
-                                            <td className="px-4 py-2.5 font-bold text-sky-300">
-                                              #{entry.position || 1}
-                                            </td>
-                                            <td className="px-4 py-2.5 text-white font-medium">
-                                              {entry.user_name || entry.user_id}
-                                            </td>
-                                            <td className="px-4 py-2.5">
-                                              <Badge status={entry.status} size="sm" />
-                                            </td>
-                                            <td className="px-4 py-2.5 text-slate-400">
-                                              {formatLocalDateTime(entry.joined_at)}
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* CANCEL BOOKING CONFIRM DIALOG */}
+      {/* CONFIRM DIALOG: CANCEL BOOKING */}
       <ConfirmDialog
         isOpen={Boolean(cancelTargetSlot)}
-        title="Cancel Confirmed Booking?"
+        title="Cancel Client Booking?"
         description={
           cancelTargetSlot ? (
-            <div className="space-y-2">
-              <p>
-                Are you sure you want to cancel the confirmed booking for{' '}
-                <strong className="text-white">
-                  {cancelTargetSlot.active_booking_holder_name || 'this customer'}
-                </strong>{' '}
-                on resource <strong className="text-white">{cancelTargetSlot.resource_id}</strong>?
-              </p>
-              <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>
-                  The slot will immediately be offered to waitlisted candidates with a temporary hold.
-                </span>
-              </div>
-            </div>
+            <span>
+              Are you sure you want to cancel the booking for{' '}
+              <strong className="text-zinc-900 font-semibold">
+                {cancelTargetSlot.active_booking_holder_name || 'this client'}
+              </strong>{' '}
+              on resource <strong className="text-zinc-900 font-semibold">{cancelTargetSlot.resource_id}</strong>?
+              The system will automatically dispatch an offer to the next waitlisted customer.
+            </span>
           ) : (
             'Are you sure you want to cancel this booking?'
           )
         }
-        confirmText="Yes, Cancel Booking"
+        confirmText="Cancel Booking"
         cancelText="Keep Booking"
         confirmVariant="danger"
         isLoading={isCancelling}
