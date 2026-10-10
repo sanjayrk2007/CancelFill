@@ -115,7 +115,8 @@ def test_slot_owner_can_cancel_booking(
 
     cancel_res = client.post(
         f"/api/v1/bookings/{booking_id}/cancel",
-        headers=business_auth_headers
+        headers=business_auth_headers,
+        json={"reason": "Owner cancelled"}
     )
     assert cancel_res.status_code == 200
     assert cancel_res.json()["booking_status"] == "CANCELLED"

@@ -1,0 +1,4 @@
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancelled_by_role VARCHAR(50);
+ALTER TABLE slots DROP CONSTRAINT IF EXISTS ck_slot_status;
+ALTER TABLE slots ADD CONSTRAINT ck_slot_status CHECK (status IN ('AVAILABLE','BOOKED','HELD','CANCELLED'));

@@ -141,6 +141,9 @@ export default function BookingsPage() {
                 </div>
 
                 <div className="space-y-2.5 text-xs">
+                  {booking.status === 'CANCELLED' && booking.cancellation_reason && (
+                    <p className="text-zinc-500">Reason: {booking.cancellation_reason}</p>
+                  )}
                   {/* Recovered from waitlist chip on RECOVERED bookings */}
                   {isRecovered && (
                     <div className="mb-2">

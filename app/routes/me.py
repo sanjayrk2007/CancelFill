@@ -83,6 +83,8 @@ def my_bookings(
             status=booking.status,
             source=booking.source,
             recovered_from_booking_id=booking.recovered_from_booking_id,
+            cancellation_reason=booking.cancellation_reason,
+            cancelled_by_role=booking.cancelled_by_role,
             slot=SlotResponse.model_validate(booking.slot),
         )
         for booking in bookings

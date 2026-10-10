@@ -14,10 +14,13 @@ class OfferExpired(Exception):
 class NotFoundError(Exception):
     pass
 
+class ReasonRequired(ValueError):
+    pass
+
 SLOT_TRANSITIONS: Dict[str, Set[str]] = {
-    "AVAILABLE": {"BOOKED", "HELD"},
+    "AVAILABLE": {"BOOKED", "HELD", "CANCELLED"},
     "BOOKED": {"AVAILABLE"},
-    "HELD": {"BOOKED", "AVAILABLE"},
+    "HELD": {"BOOKED", "AVAILABLE", "CANCELLED"},
 }
 
 HOLD_TRANSITIONS: Dict[str, Set[str]] = {

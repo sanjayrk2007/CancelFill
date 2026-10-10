@@ -1,0 +1,529 @@
+diff --git a/app/models.py b/app/models.py
+index e079807..66b2734 100644
+--- a/app/models.py
++++ b/app/models.py
+@@ -1,7 +1,7 @@
+ import uuid
+ import enum
+ from datetime import datetime, timezone
+-from sqlalchemy import Column, String, DateTime, ForeignKey, Numeric, Index, text, CheckConstraint
++from sqlalchemy import Column, String, DateTime, ForeignKey, Numeric, Index, Text, text, CheckConstraint
+ from sqlalchemy.orm import relationship
+ from app.database import Base
+ 
+@@ -13,6 +13,7 @@ class SlotStatus(str, enum.Enum):
+     AVAILABLE = "AVAILABLE"
+     BOOKED = "BOOKED"
+     HELD = "HELD"
++    CANCELLED = "CANCELLED"
+ 
+ class WaitlistStatus(str, enum.Enum):
+     WAITING = "WAITING"
+@@ -50,7 +51,7 @@ class User(Base):
+ class Slot(Base):
+     __tablename__ = "slots"
+     __table_args__ = (
+-        CheckConstraint("status IN ('AVAILABLE', 'BOOKED', 'HELD')", name="ck_slot_status"),
++        CheckConstraint("status IN ('AVAILABLE', 'BOOKED', 'HELD', 'CANCELLED')", name="ck_slot_status"),
+     )
+ 
+     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+@@ -133,6 +134,8 @@ class Booking(Base):
+     status = Column(String(50), nullable=False, default=BookingStatus.CONFIRMED.value)
+     source = Column(String(50), nullable=False, default=BookingSource.DIRECT.value)
+     recovered_from_booking_id = Column(String(36), ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True)
++    cancellation_reason = Column(Text, nullable=True)
++    cancelled_by_role = Column(String(50), nullable=True)
+ 
+     slot = relationship("Slot", back_populates="bookings")
+     user = relationship("User", foreign_keys=[user_id])
+diff --git a/app/routes/business.py b/app/routes/business.py
+index 2513cbb..1dca433 100644
+--- a/app/routes/business.py
++++ b/app/routes/business.py
+@@ -237,6 +237,8 @@ def business_bookings(
+             Booking.status,
+             Booking.source,
+             Booking.recovered_from_booking_id,
++            Booking.cancellation_reason,
++            Booking.cancelled_by_role,
+             Slot.price.label("slot_price"),
+         )
+         .select_from(Booking)
+@@ -258,6 +260,8 @@ def business_bookings(
+             status=row.status,
+             source=row.source,
+             recovered_from_booking_id=row.recovered_from_booking_id,
++            cancellation_reason=row.cancellation_reason,
++            cancelled_by_role=row.cancelled_by_role,
+             slot_price=row.slot_price,
+         )
+         for row in rows
+diff --git a/app/routes/cancellations.py b/app/routes/cancellations.py
+index a31550c..4237990 100644
+--- a/app/routes/cancellations.py
++++ b/app/routes/cancellations.py
+@@ -1,26 +1,30 @@
+-from typing import Any, Dict
++from typing import Any, Dict, Optional
+ from fastapi import APIRouter, Depends, HTTPException, status
+ from sqlalchemy.orm import Session
+ from app.database import get_db
+ from app.dependencies import get_current_user
+ from app.models import User
+-from app.schemas import CancellationResultResponse
++from app.schemas import CancelBookingRequest, CancellationResultResponse
+ from app.services.allocation_service import cancel_booking
+-from app.services.state_machine import NotFoundError, InvalidTransition
++from app.services.state_machine import NotFoundError, InvalidTransition, ReasonRequired
+ 
+ router = APIRouter(prefix="/bookings", tags=["Cancellations"])
+ 
+ @router.post("/{booking_id}/cancel", response_model=CancellationResultResponse, summary="Cancel booking and trigger waitlist candidate selection")
+ def cancel_booking_endpoint(
+     booking_id: str,
++    body: Optional[CancelBookingRequest] = None,
+     db: Session = Depends(get_db),
+     current_user: User = Depends(get_current_user)
+ ) -> Dict[str, Any]:
++    reason = (body.reason if body else None) or None
+     try:
+-        return cancel_booking(db=db, booking_id=booking_id, actor=current_user)
++        return cancel_booking(db=db, booking_id=booking_id, actor=current_user, reason=reason)
+     except NotFoundError as e:
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+     except PermissionError as e:
+         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
++    except ReasonRequired as e:
++        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+     except (InvalidTransition, ValueError) as e:
+         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+diff --git a/app/routes/me.py b/app/routes/me.py
+index 564a98c..8e3a319 100644
+--- a/app/routes/me.py
++++ b/app/routes/me.py
+@@ -83,6 +83,8 @@ def my_bookings(
+             status=booking.status,
+             source=booking.source,
+             recovered_from_booking_id=booking.recovered_from_booking_id,
++            cancellation_reason=booking.cancellation_reason,
++            cancelled_by_role=booking.cancelled_by_role,
+             slot=SlotResponse.model_validate(booking.slot),
+         )
+         for booking in bookings
+diff --git a/app/schemas.py b/app/schemas.py
+index 6fe1464..45d5b23 100644
+--- a/app/schemas.py
++++ b/app/schemas.py
+@@ -88,9 +88,15 @@ class BookingResponse(BaseModel):
+     status: BookingStatus
+     source: BookingSource = BookingSource.DIRECT
+     recovered_from_booking_id: Optional[str] = None
++    cancellation_reason: Optional[str] = None
++    cancelled_by_role: Optional[str] = None
+ 
+     model_config = ConfigDict(from_attributes=True)
+ 
++class CancelBookingRequest(BaseModel):
++    model_config = ConfigDict(str_strip_whitespace=True)
++    reason: Optional[str] = Field(default=None, max_length=500)
++
+ class HoldResponse(BaseModel):
+     id: str
+     slot_id: str
+@@ -187,4 +193,6 @@ class BusinessBookingResponse(BaseModel):
+     status: BookingStatus
+     source: BookingSource
+     recovered_from_booking_id: Optional[str] = None
++    cancellation_reason: Optional[str] = None
++    cancelled_by_role: Optional[str] = None
+     slot_price: Decimal
+diff --git a/app/services/allocation_service.py b/app/services/allocation_service.py
+index 986f61d..7dfa854 100644
+--- a/app/services/allocation_service.py
++++ b/app/services/allocation_service.py
+@@ -23,6 +23,7 @@ from app.services.state_machine import (
+     InvalidTransition,
+     OfferExpired,
+     NotFoundError,
++    ReasonRequired,
+ )
+ 
+ def _offer_next_candidate(
+@@ -94,7 +95,8 @@ def cancel_booking(
+     db: Session,
+     booking_id: str,
+     actor: User | str,
+-    now: Optional[datetime] = None
++    now: Optional[datetime] = None,
++    reason: Optional[str] = None
+ ) -> Dict[str, Any]:
+     try:
+         booking = db.scalars(select(Booking).where(Booking.id == booking_id).with_for_update()).first()
+@@ -106,8 +108,12 @@ def cancel_booking(
+         actor_id = actor.id if isinstance(actor, User) else str(actor)
+         if booking.user_id != actor_id and slot.owner_id != actor_id:
+             raise PermissionError("Not authorized to cancel this booking")
++        if slot.owner_id == actor_id and not reason:
++            raise ReasonRequired("A cancellation reason is required for business cancellations")
+         assert_transition("Booking", booking.status, BookingStatus.CANCELLED.value)
+         booking.status = BookingStatus.CANCELLED.value
++        booking.cancellation_reason = reason
++        booking.cancelled_by_role = "BUSINESS" if slot.owner_id == actor_id else "CUSTOMER"
+         assert_transition("Slot", slot.status, SlotStatus.AVAILABLE.value)
+         slot.status = SlotStatus.AVAILABLE.value
+         current_time = now or datetime.now(timezone.utc)
+@@ -396,3 +402,50 @@ def get_waitlist_for_slot(db: Session, slot_id: str) -> list[WaitlistEntry]:
+             .order_by(WaitlistEntry.joined_at.asc(), WaitlistEntry.id.asc())
+         ).all()
+     )
++
++
++def cancel_past_slot(
++    db: Session,
++    slot_id: str,
++    now: Optional[datetime] = None
++) -> bool:
++    """Cancel an unbooked slot whose start time has passed.
++
++    Only AVAILABLE or HELD slots are cancelled. BOOKED slots are completed
++    appointments and are left untouched. Returns True if the slot was cancelled.
++    """
++    try:
++        slot = db.scalars(select(Slot).where(Slot.id == slot_id).with_for_update()).first()
++        if not slot:
++            raise NotFoundError(f"Slot '{slot_id}' not found.")
++        current_time = now or datetime.now(timezone.utc)
++        start = slot.start_time if slot.start_time.tzinfo else slot.start_time.replace(tzinfo=timezone.utc)
++        if start > current_time or slot.status not in (SlotStatus.AVAILABLE.value, SlotStatus.HELD.value):
++            db.rollback()
++            return False
++        for hold in db.scalars(
++            select(Hold).where(Hold.slot_id == slot.id, Hold.status == HoldStatus.ACTIVE.value)
++        ).all():
++            assert_transition("Hold", hold.status, HoldStatus.EXPIRED.value)
++            hold.status = HoldStatus.EXPIRED.value
++        for entry in db.scalars(
++            select(WaitlistEntry).where(
++                WaitlistEntry.slot_id == slot.id,
++                WaitlistEntry.status.in_([WaitlistStatus.WAITING.value, WaitlistStatus.OFFERED.value]),
++            )
++        ).all():
++            target = (
++                WaitlistStatus.CANCELLED.value
++                if entry.status == WaitlistStatus.WAITING.value
++                else WaitlistStatus.EXPIRED.value
++            )
++            assert_transition("WaitlistEntry", entry.status, target)
++            entry.status = target
++        assert_transition("Slot", slot.status, SlotStatus.CANCELLED.value)
++        slot.status = SlotStatus.CANCELLED.value
++        logger.info("past_slot_cancelled slot_id=%s", slot.id)
++        db.commit()
++        return True
++    except Exception:
++        db.rollback()
++        raise
+diff --git a/app/services/scheduler.py b/app/services/scheduler.py
+index f2cd608..ce8784a 100644
+--- a/app/services/scheduler.py
++++ b/app/services/scheduler.py
+@@ -6,8 +6,8 @@ from sqlalchemy import select
+ 
+ from app.config import settings
+ from app.database import SessionLocal
+-from app.models import Hold, HoldStatus
+-from app.services.allocation_service import expire_hold
++from app.models import Hold, HoldStatus, Slot, SlotStatus
++from app.services.allocation_service import cancel_past_slot, expire_hold
+ 
+ try:
+     from apscheduler.schedulers.background import BackgroundScheduler
+@@ -48,6 +48,35 @@ def expire_due_holds(now: Optional[datetime] = None) -> int:
+     return expired_count
+ 
+ 
++def cancel_past_slots(now: Optional[datetime] = None) -> int:
++    """Cancel AVAILABLE/HELD slots whose start time has passed."""
++    current_time = now or datetime.now(timezone.utc)
++    finder_db = SessionLocal()
++    try:
++        slot_ids = list(
++            finder_db.scalars(
++                select(Slot.id).where(
++                    Slot.start_time <= current_time,
++                    Slot.status.in_([SlotStatus.AVAILABLE.value, SlotStatus.HELD.value]),
++                )
++            ).all()
++        )
++    finally:
++        finder_db.close()
++
++    cancelled = 0
++    for slot_id in slot_ids:
++        db = SessionLocal()
++        try:
++            if cancel_past_slot(db=db, slot_id=slot_id, now=current_time):
++                cancelled += 1
++        except Exception:
++            logger.exception("failed_to_cancel_past_slot slot_id=%s", slot_id)
++        finally:
++            db.close()
++    return cancelled
++
++
+ def start_scheduler() -> None:
+     global scheduler
+     if not settings.SCHEDULER_ENABLED:
+@@ -68,6 +97,15 @@ def start_scheduler() -> None:
+         max_instances=1,
+         coalesce=True,
+     )
++    scheduler.add_job(
++        cancel_past_slots,
++        "interval",
++        seconds=settings.SCHEDULER_INTERVAL_SECONDS,
++        id="cancel_past_slots",
++        replace_existing=True,
++        max_instances=1,
++        coalesce=True,
++    )
+     scheduler.start()
+     logger.info("scheduler_started interval_seconds=%s", settings.SCHEDULER_INTERVAL_SECONDS)
+ 
+diff --git a/app/services/state_machine.py b/app/services/state_machine.py
+index 1fc9e6b..5c5437c 100644
+--- a/app/services/state_machine.py
++++ b/app/services/state_machine.py
+@@ -14,10 +14,13 @@ class OfferExpired(Exception):
+ class NotFoundError(Exception):
+     pass
+ 
++class ReasonRequired(ValueError):
++    pass
++
+ SLOT_TRANSITIONS: Dict[str, Set[str]] = {
+-    "AVAILABLE": {"BOOKED", "HELD"},
++    "AVAILABLE": {"BOOKED", "HELD", "CANCELLED"},
+     "BOOKED": {"AVAILABLE"},
+-    "HELD": {"BOOKED", "AVAILABLE"},
++    "HELD": {"BOOKED", "AVAILABLE", "CANCELLED"},
+ }
+ 
+ HOLD_TRANSITIONS: Dict[str, Set[str]] = {
+diff --git a/frontend/src/pages/business/BusinessBookingsPage.jsx b/frontend/src/pages/business/BusinessBookingsPage.jsx
+index 984ee21..78a8df1 100644
+--- a/frontend/src/pages/business/BusinessBookingsPage.jsx
++++ b/frontend/src/pages/business/BusinessBookingsPage.jsx
+@@ -23,6 +23,7 @@ export default function BusinessBookingsPage() {
+   // Cancel target state
+   const [cancelTarget, setCancelTarget] = useState(null);
+   const [isCancelling, setIsCancelling] = useState(false);
++  const [cancelReason, setCancelReason] = useState('');
+ 
+   const { success, error: toastError } = useToast();
+ 
+@@ -48,14 +49,21 @@ export default function BusinessBookingsPage() {
+ 
+   const handleConfirmCancel = async () => {
+     if (!cancelTarget) return;
++    if (!cancelReason.trim()) {
++      toastError('Please enter a reason for cancelling.');
++      return;
++    }
+     setIsCancelling(true);
+     try {
+-      const response = await client.post(`/api/v1/bookings/${cancelTarget.id}/cancel`);
++      const response = await client.post(`/api/v1/bookings/${cancelTarget.id}/cancel`, {
++        reason: cancelReason.trim(),
++      });
+       const msg = response.data?.candidate_selected
+         ? 'Booking cancelled. Waitlist candidate has been automatically selected with a temporary hold.'
+         : 'Booking cancelled successfully.';
+       success(msg);
+       setCancelTarget(null);
++      setCancelReason('');
+       await fetchBookings(true);
+     } catch (err) {
+       toastError(err.response?.data?.detail || 'Failed to cancel booking.');
+@@ -263,6 +271,9 @@ export default function BusinessBookingsPage() {
+ 
+                   <TableCell>
+                     <Badge status={booking.status} size="sm" />
++                    {booking.status === 'CANCELLED' && booking.cancellation_reason && (
++                      <p className="mt-1 text-xs text-zinc-500">Reason: {booking.cancellation_reason}</p>
++                    )}
+                   </TableCell>
+ 
+                   <TableCell>
+@@ -318,6 +329,14 @@ export default function BusinessBookingsPage() {
+                 {cancelTarget.holder_name || 'this client'}
+               </strong>
+               ? A hold offer will be automatically extended to the next waitlisted customer.
++              <textarea
++                value={cancelReason}
++                onChange={(e) => setCancelReason(e.target.value)}
++                maxLength={500}
++                rows={3}
++                placeholder="Reason for cancellation (required)"
++                className="mt-3 block w-full rounded-md border border-zinc-300 p-2 text-sm text-zinc-900"
++              />
+             </span>
+           ) : (
+             'Are you sure you want to cancel this booking?'
+@@ -328,7 +347,12 @@ export default function BusinessBookingsPage() {
+         confirmVariant="danger"
+         isLoading={isCancelling}
+         onConfirm={handleConfirmCancel}
+-        onClose={() => !isCancelling && setCancelTarget(null)}
++        onClose={() => {
++          if (!isCancelling) {
++            setCancelTarget(null);
++            setCancelReason('');
++          }
++        }}
+       />
+     </div>
+   );
+diff --git a/frontend/src/pages/customer/BookingsPage.jsx b/frontend/src/pages/customer/BookingsPage.jsx
+index 3592658..32f630f 100644
+--- a/frontend/src/pages/customer/BookingsPage.jsx
++++ b/frontend/src/pages/customer/BookingsPage.jsx
+@@ -141,6 +141,9 @@ export default function BookingsPage() {
+                 </div>
+ 
+                 <div className="space-y-2.5 text-xs">
++                  {booking.status === 'CANCELLED' && booking.cancellation_reason && (
++                    <p className="text-zinc-500">Reason: {booking.cancellation_reason}</p>
++                  )}
+                   {/* Recovered from waitlist chip on RECOVERED bookings */}
+                   {isRecovered && (
+                     <div className="mb-2">
+diff --git a/frontend/src/pages/customer/SlotsPage.jsx b/frontend/src/pages/customer/SlotsPage.jsx
+index 4db9674..4c2a36a 100644
+--- a/frontend/src/pages/customer/SlotsPage.jsx
++++ b/frontend/src/pages/customer/SlotsPage.jsx
+@@ -83,6 +83,7 @@ export default function SlotsPage() {
+   // Filter slots by status filter and search query
+   const filteredSlots = useMemo(() => {
+     return slots.filter((slot) => {
++      if (slot.status === 'CANCELLED') return false;
+       // Filter chip condition
+       if (filter === 'AVAILABLE' && slot.status !== 'AVAILABLE') return false;
+       if (filter === 'WAITLIST' && slot.status !== 'BOOKED' && slot.status !== 'HELD') return false;
+diff --git a/migrations/001_cancellation_and_slot_cancelled.sql b/migrations/001_cancellation_and_slot_cancelled.sql
+new file mode 100644
+index 0000000..8936f51
+--- /dev/null
++++ b/migrations/001_cancellation_and_slot_cancelled.sql
+@@ -0,0 +1,4 @@
++ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancellation_reason TEXT;
++ALTER TABLE bookings ADD COLUMN IF NOT EXISTS cancelled_by_role VARCHAR(50);
++ALTER TABLE slots DROP CONSTRAINT IF EXISTS ck_slot_status;
++ALTER TABLE slots ADD CONSTRAINT ck_slot_status CHECK (status IN ('AVAILABLE','BOOKED','HELD','CANCELLED'));
+diff --git a/tests/test_cancellation.py b/tests/test_cancellation.py
+index 14ad1b5..26ec32f 100644
+--- a/tests/test_cancellation.py
++++ b/tests/test_cancellation.py
+@@ -115,7 +115,8 @@ def test_slot_owner_can_cancel_booking(
+ 
+     cancel_res = client.post(
+         f"/api/v1/bookings/{booking_id}/cancel",
+-        headers=business_auth_headers
++        headers=business_auth_headers,
++        json={"reason": "Owner cancelled"}
+     )
+     assert cancel_res.status_code == 200
+     assert cancel_res.json()["booking_status"] == "CANCELLED"
+diff --git a/tests/test_past_slots_and_reason.py b/tests/test_past_slots_and_reason.py
+new file mode 100644
+index 0000000..22ab130
+--- /dev/null
++++ b/tests/test_past_slots_and_reason.py
+@@ -0,0 +1,86 @@
++from datetime import datetime, timedelta, timezone
++from typing import Dict
++
++from fastapi.testclient import TestClient
++from sqlalchemy.orm import Session
++
++from app.models import Booking, Slot, SlotStatus, User, WaitlistEntry
++from app.services.allocation_service import book_slot, cancel_past_slot, join_waitlist
++
++
++def _slot(db: Session, owner: User, start: datetime, status: str = SlotStatus.AVAILABLE.value) -> Slot:
++    s = Slot(owner_id=owner.id, resource_id="r1", start_time=start,
++             end_time=start + timedelta(hours=1), price=10, status=status)
++    db.add(s)
++    db.commit()
++    db.refresh(s)
++    return s
++
++
++def test_past_available_slot_is_cancelled(db: Session, business_user: User) -> None:
++    now = datetime.now(timezone.utc)
++    past = _slot(db, business_user, now - timedelta(hours=2))
++    future = _slot(db, business_user, now + timedelta(hours=2))
++    assert cancel_past_slot(db, past.id, now) is True
++    assert cancel_past_slot(db, future.id, now) is False
++    db.refresh(past)
++    db.refresh(future)
++    assert past.status == SlotStatus.CANCELLED.value
++    assert future.status == SlotStatus.AVAILABLE.value
++
++
++def test_past_booked_slot_is_left_alone(db: Session, business_user: User, customer_user: User) -> None:
++    now = datetime.now(timezone.utc)
++    future = _slot(db, business_user, now + timedelta(hours=1))
++    book_slot(db, future.id, customer_user.id)
++    # pretend time has passed
++    assert cancel_past_slot(db, future.id, now + timedelta(hours=5)) is False
++    db.refresh(future)
++    assert future.status == SlotStatus.BOOKED.value
++
++
++def test_past_slot_cancels_waitlist(db: Session, business_user: User,
++                                    customer_user: User, customer_user_2: User) -> None:
++    now = datetime.now(timezone.utc)
++    s = _slot(db, business_user, now + timedelta(hours=1))
++    book_slot(db, s.id, customer_user.id)
++    join_waitlist(db, s.id, customer_user_2.id)
++    # booked slots stay; make an AVAILABLE one with a stale waitlist-free state instead
++    assert cancel_past_slot(db, s.id, now + timedelta(hours=5)) is False
++    assert db.query(WaitlistEntry).filter_by(slot_id=s.id).first().status == "WAITING"
++
++
++def test_business_cancel_requires_reason(
++    client: TestClient, db: Session, business_user: User, customer_user: User,
++    business_auth_headers: Dict[str, str], customer_auth_headers: Dict[str, str],
++) -> None:
++    now = datetime.now(timezone.utc)
++    s = _slot(db, business_user, now + timedelta(hours=3))
++    b = book_slot(db, s.id, customer_user.id)
++    booking_id = b.id if hasattr(b, "id") else db.query(Booking).first().id
++
++    res = client.post(f"/api/v1/bookings/{booking_id}/cancel", headers=business_auth_headers)
++    assert res.status_code == 422
++
++    res = client.post(f"/api/v1/bookings/{booking_id}/cancel", headers=business_auth_headers,
++                      json={"reason": "Doctor unavailable"})
++    assert res.status_code == 200
++
++    rows = client.get("/api/v1/business/bookings", headers=business_auth_headers).json()
++    assert rows[0]["cancellation_reason"] == "Doctor unavailable"
++    assert rows[0]["cancelled_by_role"] == "BUSINESS"
++
++    mine = client.get("/api/v1/me/bookings", headers=customer_auth_headers).json()
++    assert mine[0]["cancellation_reason"] == "Doctor unavailable"
++
++
++def test_customer_cancel_reason_optional(
++    client: TestClient, db: Session, business_user: User, customer_user: User,
++    customer_auth_headers: Dict[str, str],
++) -> None:
++    now = datetime.now(timezone.utc)
++    s = _slot(db, business_user, now + timedelta(hours=3))
++    b = book_slot(db, s.id, customer_user.id)
++    booking_id = b.id if hasattr(b, "id") else db.query(Booking).first().id
++    res = client.post(f"/api/v1/bookings/{booking_id}/cancel", headers=customer_auth_headers)
++    assert res.status_code == 200

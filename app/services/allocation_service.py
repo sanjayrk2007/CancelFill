@@ -23,6 +23,7 @@ from app.services.state_machine import (
     InvalidTransition,
     OfferExpired,
     NotFoundError,
+    ReasonRequired,
 )
 
 def _offer_next_candidate(
@@ -94,7 +95,8 @@ def cancel_booking(
     db: Session,
     booking_id: str,
     actor: User | str,
-    now: Optional[datetime] = None
+    now: Optional[datetime] = None,
+    reason: Optional[str] = None
 ) -> Dict[str, Any]:
     try:
         booking = db.scalars(select(Booking).where(Booking.id == booking_id).with_for_update()).first()
@@ -106,8 +108,12 @@ def cancel_booking(
         actor_id = actor.id if isinstance(actor, User) else str(actor)
         if booking.user_id != actor_id and slot.owner_id != actor_id:
             raise PermissionError("Not authorized to cancel this booking")
+        if slot.owner_id == actor_id and not reason:
+            raise ReasonRequired("A cancellation reason is required for business cancellations")
         assert_transition("Booking", booking.status, BookingStatus.CANCELLED.value)
         booking.status = BookingStatus.CANCELLED.value
+        booking.cancellation_reason = reason
+        booking.cancelled_by_role = "BUSINESS" if slot.owner_id == actor_id else "CUSTOMER"
         assert_transition("Slot", slot.status, SlotStatus.AVAILABLE.value)
         slot.status = SlotStatus.AVAILABLE.value
         current_time = now or datetime.now(timezone.utc)
@@ -396,3 +402,50 @@ def get_waitlist_for_slot(db: Session, slot_id: str) -> list[WaitlistEntry]:
             .order_by(WaitlistEntry.joined_at.asc(), WaitlistEntry.id.asc())
         ).all()
     )
+
+
+def cancel_past_slot(
+    db: Session,
+    slot_id: str,
+    now: Optional[datetime] = None
+) -> bool:
+    """Cancel an unbooked slot whose start time has passed.
+
+    Only AVAILABLE or HELD slots are cancelled. BOOKED slots are completed
+    appointments and are left untouched. Returns True if the slot was cancelled.
+    """
+    try:
+        slot = db.scalars(select(Slot).where(Slot.id == slot_id).with_for_update()).first()
+        if not slot:
+            raise NotFoundError(f"Slot '{slot_id}' not found.")
+        current_time = now or datetime.now(timezone.utc)
+        start = slot.start_time if slot.start_time.tzinfo else slot.start_time.replace(tzinfo=timezone.utc)
+        if start > current_time or slot.status not in (SlotStatus.AVAILABLE.value, SlotStatus.HELD.value):
+            db.rollback()
+            return False
+        for hold in db.scalars(
+            select(Hold).where(Hold.slot_id == slot.id, Hold.status == HoldStatus.ACTIVE.value)
+        ).all():
+            assert_transition("Hold", hold.status, HoldStatus.EXPIRED.value)
+            hold.status = HoldStatus.EXPIRED.value
+        for entry in db.scalars(
+            select(WaitlistEntry).where(
+                WaitlistEntry.slot_id == slot.id,
+                WaitlistEntry.status.in_([WaitlistStatus.WAITING.value, WaitlistStatus.OFFERED.value]),
+            )
+        ).all():
+            target = (
+                WaitlistStatus.CANCELLED.value
+                if entry.status == WaitlistStatus.WAITING.value
+                else WaitlistStatus.EXPIRED.value
+            )
+            assert_transition("WaitlistEntry", entry.status, target)
+            entry.status = target
+        assert_transition("Slot", slot.status, SlotStatus.CANCELLED.value)
+        slot.status = SlotStatus.CANCELLED.value
+        logger.info("past_slot_cancelled slot_id=%s", slot.id)
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise

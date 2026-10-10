@@ -23,6 +23,7 @@ export default function BusinessBookingsPage() {
   // Cancel target state
   const [cancelTarget, setCancelTarget] = useState(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
 
   const { success, error: toastError } = useToast();
 
@@ -48,14 +49,21 @@ export default function BusinessBookingsPage() {
 
   const handleConfirmCancel = async () => {
     if (!cancelTarget) return;
+    if (!cancelReason.trim()) {
+      toastError('Please enter a reason for cancelling.');
+      return;
+    }
     setIsCancelling(true);
     try {
-      const response = await client.post(`/api/v1/bookings/${cancelTarget.id}/cancel`);
+      const response = await client.post(`/api/v1/bookings/${cancelTarget.id}/cancel`, {
+        reason: cancelReason.trim(),
+      });
       const msg = response.data?.candidate_selected
         ? 'Booking cancelled. Waitlist candidate has been automatically selected with a temporary hold.'
         : 'Booking cancelled successfully.';
       success(msg);
       setCancelTarget(null);
+      setCancelReason('');
       await fetchBookings(true);
     } catch (err) {
       toastError(err.response?.data?.detail || 'Failed to cancel booking.');
@@ -263,6 +271,9 @@ export default function BusinessBookingsPage() {
 
                   <TableCell>
                     <Badge status={booking.status} size="sm" />
+                    {booking.status === 'CANCELLED' && booking.cancellation_reason && (
+                      <p className="mt-1 text-xs text-zinc-500">Reason: {booking.cancellation_reason}</p>
+                    )}
                   </TableCell>
 
                   <TableCell>
@@ -318,6 +329,14 @@ export default function BusinessBookingsPage() {
                 {cancelTarget.holder_name || 'this client'}
               </strong>
               ? A hold offer will be automatically extended to the next waitlisted customer.
+              <textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                maxLength={500}
+                rows={3}
+                placeholder="Reason for cancellation (required)"
+                className="mt-3 block w-full rounded-md border border-zinc-300 p-2 text-sm text-zinc-900"
+              />
             </span>
           ) : (
             'Are you sure you want to cancel this booking?'
@@ -328,7 +347,12 @@ export default function BusinessBookingsPage() {
         confirmVariant="danger"
         isLoading={isCancelling}
         onConfirm={handleConfirmCancel}
-        onClose={() => !isCancelling && setCancelTarget(null)}
+        onClose={() => {
+          if (!isCancelling) {
+            setCancelTarget(null);
+            setCancelReason('');
+          }
+        }}
       />
     </div>
   );

@@ -83,6 +83,7 @@ export default function SlotsPage() {
   // Filter slots by status filter and search query
   const filteredSlots = useMemo(() => {
     return slots.filter((slot) => {
+      if (slot.status === 'CANCELLED') return false;
       // Filter chip condition
       if (filter === 'AVAILABLE' && slot.status !== 'AVAILABLE') return false;
       if (filter === 'WAITLIST' && slot.status !== 'BOOKED' && slot.status !== 'HELD') return false;

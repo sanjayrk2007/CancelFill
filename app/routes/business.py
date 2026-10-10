@@ -237,6 +237,8 @@ def business_bookings(
             Booking.status,
             Booking.source,
             Booking.recovered_from_booking_id,
+            Booking.cancellation_reason,
+            Booking.cancelled_by_role,
             Slot.price.label("slot_price"),
         )
         .select_from(Booking)
@@ -258,6 +260,8 @@ def business_bookings(
             status=row.status,
             source=row.source,
             recovered_from_booking_id=row.recovered_from_booking_id,
+            cancellation_reason=row.cancellation_reason,
+            cancelled_by_role=row.cancelled_by_role,
             slot_price=row.slot_price,
         )
         for row in rows

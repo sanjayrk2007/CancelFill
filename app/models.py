@@ -1,7 +1,7 @@
 import uuid
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, DateTime, ForeignKey, Numeric, Index, text, CheckConstraint
+from sqlalchemy import Column, String, DateTime, ForeignKey, Numeric, Index, Text, text, CheckConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -13,6 +13,7 @@ class SlotStatus(str, enum.Enum):
     AVAILABLE = "AVAILABLE"
     BOOKED = "BOOKED"
     HELD = "HELD"
+    CANCELLED = "CANCELLED"
 
 class WaitlistStatus(str, enum.Enum):
     WAITING = "WAITING"
@@ -50,7 +51,7 @@ class User(Base):
 class Slot(Base):
     __tablename__ = "slots"
     __table_args__ = (
-        CheckConstraint("status IN ('AVAILABLE', 'BOOKED', 'HELD')", name="ck_slot_status"),
+        CheckConstraint("status IN ('AVAILABLE', 'BOOKED', 'HELD', 'CANCELLED')", name="ck_slot_status"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -133,6 +134,8 @@ class Booking(Base):
     status = Column(String(50), nullable=False, default=BookingStatus.CONFIRMED.value)
     source = Column(String(50), nullable=False, default=BookingSource.DIRECT.value)
     recovered_from_booking_id = Column(String(36), ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True)
+    cancellation_reason = Column(Text, nullable=True)
+    cancelled_by_role = Column(String(50), nullable=True)
 
     slot = relationship("Slot", back_populates="bookings")
     user = relationship("User", foreign_keys=[user_id])

@@ -88,8 +88,14 @@ class BookingResponse(BaseModel):
     status: BookingStatus
     source: BookingSource = BookingSource.DIRECT
     recovered_from_booking_id: Optional[str] = None
+    cancellation_reason: Optional[str] = None
+    cancelled_by_role: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+class CancelBookingRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 class HoldResponse(BaseModel):
     id: str
@@ -187,4 +193,6 @@ class BusinessBookingResponse(BaseModel):
     status: BookingStatus
     source: BookingSource
     recovered_from_booking_id: Optional[str] = None
+    cancellation_reason: Optional[str] = None
+    cancelled_by_role: Optional[str] = None
     slot_price: Decimal

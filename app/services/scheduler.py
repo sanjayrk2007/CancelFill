@@ -6,8 +6,8 @@ from sqlalchemy import select
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Hold, HoldStatus
-from app.services.allocation_service import expire_hold
+from app.models import Hold, HoldStatus, Slot, SlotStatus
+from app.services.allocation_service import cancel_past_slot, expire_hold
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -48,6 +48,35 @@ def expire_due_holds(now: Optional[datetime] = None) -> int:
     return expired_count
 
 
+def cancel_past_slots(now: Optional[datetime] = None) -> int:
+    """Cancel AVAILABLE/HELD slots whose start time has passed."""
+    current_time = now or datetime.now(timezone.utc)
+    finder_db = SessionLocal()
+    try:
+        slot_ids = list(
+            finder_db.scalars(
+                select(Slot.id).where(
+                    Slot.start_time <= current_time,
+                    Slot.status.in_([SlotStatus.AVAILABLE.value, SlotStatus.HELD.value]),
+                )
+            ).all()
+        )
+    finally:
+        finder_db.close()
+
+    cancelled = 0
+    for slot_id in slot_ids:
+        db = SessionLocal()
+        try:
+            if cancel_past_slot(db=db, slot_id=slot_id, now=current_time):
+                cancelled += 1
+        except Exception:
+            logger.exception("failed_to_cancel_past_slot slot_id=%s", slot_id)
+        finally:
+            db.close()
+    return cancelled
+
+
 def start_scheduler() -> None:
     global scheduler
     if not settings.SCHEDULER_ENABLED:
@@ -64,6 +93,15 @@ def start_scheduler() -> None:
         "interval",
         seconds=settings.SCHEDULER_INTERVAL_SECONDS,
         id="expire_due_holds",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        cancel_past_slots,
+        "interval",
+        seconds=settings.SCHEDULER_INTERVAL_SECONDS,
+        id="cancel_past_slots",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
