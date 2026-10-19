@@ -16,6 +16,7 @@ from app.models import (
     BookingStatus,
     BookingSource,
     User,
+    UserRole,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,67 @@ SEATS_PER_SLOT = 1
 
 class AlreadyHolding(ValueError):
     """The customer already has a confirmed booking or an active hold on this slot."""
+
+
+class EligibilityResult:
+    def __init__(self, eligible: bool, reason: Optional[str] = None):
+        self.eligible = eligible
+        self.reason = reason
+
+    def __bool__(self) -> bool:
+        return self.eligible
+
+    def __iter__(self):
+        return iter((self.eligible, self.reason))
+
+    def __getitem__(self, index):
+        return (self.eligible, self.reason)[index]
+
+    def __eq__(self, other):
+        if isinstance(other, bool):
+            return self.eligible == other
+        if isinstance(other, tuple):
+            return (self.eligible, self.reason) == other
+        return super().__eq__(other)
+
+
+def is_candidate_eligible(
+    db: Session,
+    entry: WaitlistEntry,
+    slot: Slot
+) -> EligibilityResult:
+    if entry.status != WaitlistStatus.WAITING.value:
+        return EligibilityResult(False, f"waitlist entry status is {entry.status}, expected WAITING")
+    user = db.get(User, entry.user_id)
+    if not user:
+        return EligibilityResult(False, "user does not exist")
+    if not user.is_active:
+        return EligibilityResult(False, "user is inactive")
+    if user.role != UserRole.CUSTOMER.value:
+        return EligibilityResult(False, f"user role is {user.role}, expected CUSTOMER")
+    has_booking = db.scalar(
+        select(func.count(Booking.id)).where(
+            Booking.slot_id == slot.id,
+            Booking.user_id == entry.user_id,
+            Booking.status == BookingStatus.CONFIRMED.value,
+        )
+    ) or 0
+    if has_booking > 0:
+        return EligibilityResult(False, "user already has a confirmed booking for this slot")
+    has_hold = db.scalar(
+        select(func.count(Hold.id)).where(
+            Hold.slot_id == slot.id,
+            Hold.user_id == entry.user_id,
+            Hold.status == HoldStatus.ACTIVE.value,
+        )
+    ) or 0
+    if has_hold > 0:
+        return EligibilityResult(False, "user already has an active hold for this slot")
+    return EligibilityResult(True, None)
+
+
+is_eligible_candidate = is_candidate_eligible
+check_candidate_eligibility = is_candidate_eligible
 
 
 def _seat_counts(db: Session, slot: Slot) -> Tuple[int, int]:
@@ -91,33 +153,47 @@ def _offer_next_candidate(
 ) -> Tuple[Optional[Hold], Optional[WaitlistEntry]]:
     if slot.status == SlotStatus.CANCELLED.value or free_seats(db, slot) <= 0:
         return None, None
-    entry = db.scalars(
+    entries = db.scalars(
         select(WaitlistEntry)
         .where(
             WaitlistEntry.slot_id == slot.id,
             WaitlistEntry.status == WaitlistStatus.WAITING.value
         )
         .order_by(WaitlistEntry.joined_at.asc(), WaitlistEntry.id.asc())
-    ).first()
-    if not entry:
-        return None, None
-    assert_transition("WaitlistEntry", entry.status, WaitlistStatus.OFFERED.value)
-    entry.status = WaitlistStatus.OFFERED.value
-    expires_at = current_time + timedelta(seconds=settings.DEFAULT_HOLD_DURATION_SECONDS)
-    hold = Hold(
-        slot_id=slot.id,
-        user_id=entry.user_id,
-        created_at=current_time,
-        expires_at=expires_at,
-        status=HoldStatus.ACTIVE.value,
-        kind=HoldKind.OFFER.value,
-    )
-    db.add(hold)
-    db.flush()
+    ).all()
+    for entry in entries:
+        eligible, reason = is_candidate_eligible(db, entry, slot)
+        if not eligible:
+            assert_transition("WaitlistEntry", entry.status, WaitlistStatus.CANCELLED.value)
+            entry.status = WaitlistStatus.CANCELLED.value
+            db.flush()
+            logger.info(
+                "waitlist_candidate_ineligible entry_id=%s slot_id=%s user_id=%s reason=%s",
+                entry.id,
+                slot.id,
+                entry.user_id,
+                reason,
+            )
+            continue
+        assert_transition("WaitlistEntry", entry.status, WaitlistStatus.OFFERED.value)
+        entry.status = WaitlistStatus.OFFERED.value
+        expires_at = current_time + timedelta(seconds=settings.DEFAULT_HOLD_DURATION_SECONDS)
+        hold = Hold(
+            slot_id=slot.id,
+            user_id=entry.user_id,
+            created_at=current_time,
+            expires_at=expires_at,
+            status=HoldStatus.ACTIVE.value,
+            kind=HoldKind.OFFER.value,
+        )
+        db.add(hold)
+        db.flush()
+        sync_slot_status(db, slot)
+        notifications.notify_offer_created(db, hold, slot, now=current_time)
+        logger.info("offer_created hold_id=%s slot_id=%s user_id=%s", hold.id, hold.slot_id, hold.user_id)
+        return hold, entry
     sync_slot_status(db, slot)
-    notifications.notify_offer_created(db, hold, slot, now=current_time)
-    logger.info("offer_created hold_id=%s slot_id=%s user_id=%s", hold.id, hold.slot_id, hold.user_id)
-    return hold, entry
+    return None, None
 
 
 def offer_all_candidates(

@@ -560,3 +560,173 @@ def test_db_partial_unique_index_guards(
     with pytest.raises(IntegrityError):
         db.commit()
     db.rollback()
+
+
+def test_first_candidate_deactivated_second_gets_offer(
+    client: TestClient,
+    db: Session,
+    business_auth_headers: Dict[str, str],
+    customer_auth_headers: Dict[str, str],
+    customer_2_auth_headers: Dict[str, str],
+    customer_user: User,
+    customer_user_2: User,
+    other_customer_user: User,
+    other_customer_auth_headers: Dict[str, str]
+) -> None:
+    now = datetime.now(timezone.utc)
+    slot_res = client.post(
+        "/api/v1/slots",
+        json={
+            "resource_id": "eligibility_skip_test",
+            "start_time": (now + timedelta(hours=1)).isoformat(),
+            "end_time": (now + timedelta(hours=2)).isoformat(),
+            "price": "50.00"
+        },
+        headers=business_auth_headers
+    )
+    slot_id = slot_res.json()["id"]
+
+    client.post("/api/v1/bookings", json={"slot_id": slot_id}, headers=customer_auth_headers)
+    booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
+
+    client.post("/api/v1/waitlist", json={"slot_id": slot_id}, headers=customer_2_auth_headers)
+    client.post("/api/v1/waitlist", json={"slot_id": slot_id}, headers=other_customer_auth_headers)
+
+    customer_user_2.is_active = False
+    db.commit()
+
+    cancel_res = client.post(f"/api/v1/bookings/{booking.id}/cancel", headers=customer_auth_headers)
+    assert cancel_res.status_code == 200
+    cancel_data = cancel_res.json()
+    assert cancel_data["candidate_selected"] is True
+    assert cancel_data["selected_user_id"] == other_customer_user.id
+    assert cancel_data["hold"]["user_id"] == other_customer_user.id
+
+    db.expire_all()
+    w1 = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id, WaitlistEntry.user_id == customer_user_2.id).one()
+    w2 = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id, WaitlistEntry.user_id == other_customer_user.id).one()
+    assert w1.status == WaitlistStatus.CANCELLED.value
+    assert w2.status == WaitlistStatus.OFFERED.value
+
+    slot = db.query(Slot).filter(Slot.id == slot_id).one()
+    assert slot.status == SlotStatus.HELD.value
+    assert_invariants(db)
+
+
+def test_all_candidates_ineligible_slot_becomes_available(
+    client: TestClient,
+    db: Session,
+    business_auth_headers: Dict[str, str],
+    customer_auth_headers: Dict[str, str],
+    customer_2_auth_headers: Dict[str, str],
+    customer_user_2: User,
+    other_customer_user: User,
+    other_customer_auth_headers: Dict[str, str]
+) -> None:
+    now = datetime.now(timezone.utc)
+    slot_res = client.post(
+        "/api/v1/slots",
+        json={
+            "resource_id": "all_ineligible_test",
+            "start_time": (now + timedelta(hours=1)).isoformat(),
+            "end_time": (now + timedelta(hours=2)).isoformat(),
+            "price": "50.00"
+        },
+        headers=business_auth_headers
+    )
+    slot_id = slot_res.json()["id"]
+
+    client.post("/api/v1/bookings", json={"slot_id": slot_id}, headers=customer_auth_headers)
+    booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
+
+    client.post("/api/v1/waitlist", json={"slot_id": slot_id}, headers=customer_2_auth_headers)
+    client.post("/api/v1/waitlist", json={"slot_id": slot_id}, headers=other_customer_auth_headers)
+
+    customer_user_2.is_active = False
+    other_customer_user.is_active = False
+    db.commit()
+
+    cancel_res = client.post(f"/api/v1/bookings/{booking.id}/cancel", headers=customer_auth_headers)
+    assert cancel_res.status_code == 200
+    cancel_data = cancel_res.json()
+    assert cancel_data["candidate_selected"] is False
+    assert cancel_data["selected_user_id"] is None
+    assert cancel_data["slot_status"] == SlotStatus.AVAILABLE.value
+
+    db.expire_all()
+    w1 = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id, WaitlistEntry.user_id == customer_user_2.id).one()
+    w2 = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id, WaitlistEntry.user_id == other_customer_user.id).one()
+    assert w1.status == WaitlistStatus.CANCELLED.value
+    assert w2.status == WaitlistStatus.CANCELLED.value
+
+    slot = db.query(Slot).filter(Slot.id == slot_id).one()
+    assert slot.status == SlotStatus.AVAILABLE.value
+    assert_invariants(db)
+
+
+def test_ordering_preserved_with_ineligible_candidates(
+    client: TestClient,
+    db: Session,
+    business_auth_headers: Dict[str, str],
+    customer_auth_headers: Dict[str, str],
+    customer_user: User,
+    customer_user_2: User,
+    other_customer_user: User,
+    other_customer_auth_headers: Dict[str, str]
+) -> None:
+    now = datetime.now(timezone.utc)
+    slot_res = client.post(
+        "/api/v1/slots",
+        json={
+            "resource_id": "ordering_preserved_test",
+            "start_time": (now + timedelta(hours=1)).isoformat(),
+            "end_time": (now + timedelta(hours=2)).isoformat(),
+            "price": "50.00"
+        },
+        headers=business_auth_headers
+    )
+    slot_id = slot_res.json()["id"]
+
+    client.post("/api/v1/bookings", json={"slot_id": slot_id}, headers=customer_auth_headers)
+    booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
+
+    third_customer = User(
+        email="cust3@example.com",
+        name="Customer Three",
+        password_hash="pw",
+        role="CUSTOMER"
+    )
+    db.add(third_customer)
+    db.commit()
+
+    join_waitlist(db=db, slot_id=slot_id, user_id=customer_user_2.id, joined_at=now - timedelta(minutes=15))
+    join_waitlist(db=db, slot_id=slot_id, user_id=other_customer_user.id, joined_at=now - timedelta(minutes=10))
+    join_waitlist(db=db, slot_id=slot_id, user_id=third_customer.id, joined_at=now - timedelta(minutes=5))
+
+    customer_user_2.is_active = False
+    db.commit()
+
+    cancel_res = client.post(f"/api/v1/bookings/{booking.id}/cancel", headers=customer_auth_headers)
+    assert cancel_res.status_code == 200
+    cancel_data = cancel_res.json()
+    assert cancel_data["selected_user_id"] == other_customer_user.id
+
+    db.expire_all()
+    w1 = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id, WaitlistEntry.user_id == customer_user_2.id).one()
+    w2 = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id, WaitlistEntry.user_id == other_customer_user.id).one()
+    w3 = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id, WaitlistEntry.user_id == third_customer.id).one()
+
+    assert w1.status == WaitlistStatus.CANCELLED.value
+    assert w2.status == WaitlistStatus.OFFERED.value
+    assert w3.status == WaitlistStatus.WAITING.value
+
+    hold = db.query(Hold).filter(Hold.slot_id == slot_id, Hold.status == HoldStatus.ACTIVE.value).one()
+    decline_res = client.post(f"/api/v1/holds/{hold.id}/decline", headers=other_customer_auth_headers)
+    assert decline_res.status_code == 200
+
+    db.expire_all()
+    w2 = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id, WaitlistEntry.user_id == other_customer_user.id).one()
+    w3 = db.query(WaitlistEntry).filter(WaitlistEntry.slot_id == slot_id, WaitlistEntry.user_id == third_customer.id).one()
+    assert w2.status == WaitlistStatus.DECLINED.value
+    assert w3.status == WaitlistStatus.OFFERED.value
+    assert_invariants(db)

@@ -24,6 +24,7 @@ CREATE TABLE users (
 	notify_email BOOLEAN NOT NULL, 
 	notify_sms BOOLEAN NOT NULL, 
 	notify_push BOOLEAN NOT NULL, 
+	is_active BOOLEAN NOT NULL DEFAULT TRUE, 
 	PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX ix_users_email ON users (email);

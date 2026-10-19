@@ -82,6 +82,7 @@ class User(Base):
     notify_email = Column(Boolean, nullable=False, default=True)
     notify_sms = Column(Boolean, nullable=False, default=True)
     notify_push = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=True, server_default="true")
 
     business_profile = relationship("Business", back_populates="user", uselist=False, cascade="all, delete-orphan")
 

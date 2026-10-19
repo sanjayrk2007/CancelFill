@@ -288,3 +288,25 @@ def test_customer_cannot_edit_business_fields(
         json={"business_name": "Unauthorized Business Name"}
     )
     assert res.status_code == 403
+
+
+def test_login_inactive_user_blocked_with_403(
+    client: TestClient,
+    db: Session,
+    customer_user: User
+) -> None:
+    customer_user.is_active = False
+    db.commit()
+
+    res = client.post(
+        "/api/v1/auth/login",
+        json={"email": customer_user.email, "password": "password123"}
+    )
+    assert res.status_code == 403
+    assert res.json()["detail"] == "Account is inactive"
+
+    res_wrong_pw = client.post(
+        "/api/v1/auth/login",
+        json={"email": customer_user.email, "password": "wrongpassword"}
+    )
+    assert res_wrong_pw.status_code == 401
