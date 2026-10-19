@@ -1,8 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
-from pydantic import BaseModel, ConfigDict, Field
-from app.models import SlotStatus, WaitlistStatus, HoldStatus, BookingStatus, BookingSource, UserRole
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from app.models import SlotStatus, WaitlistStatus, HoldStatus, BookingStatus, BookingSource, UserRole, PaymentStatus
 
 class UserRegister(BaseModel):
     email: str = Field(..., json_schema_extra={"example": "user@example.com"})
@@ -24,12 +24,40 @@ class UserResponse(BaseModel):
     name: str
     role: UserRole
     created_at: datetime
+    phone: Optional[str] = None
+    notify_email: bool = True
+    notify_sms: bool = True
+    notify_push: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 
 class UserUpdate(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
-    name: str = Field(..., min_length=1, max_length=60, json_schema_extra={"example": "Alice"})
+    name: Optional[str] = Field(default=None, min_length=1, max_length=60, json_schema_extra={"example": "Alice"})
+    phone: Optional[str] = Field(default=None, max_length=32, json_schema_extra={"example": "+919876543210"})
+    notify_email: Optional[bool] = None
+    notify_sms: Optional[bool] = None
+    notify_push: Optional[bool] = None
+
+    @field_validator("phone")
+    @classmethod
+    def _valid_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return v
+        import re
+        if not re.fullmatch(r"\+[1-9]\d{7,14}", v):
+            raise ValueError("Phone must be in international format, e.g. +919876543210")
+        return v
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(..., min_length=10)
+    new_password: str = Field(..., min_length=8)
+
+class MessageResponse(BaseModel):
+    message: str
 
 class PasswordChange(BaseModel):
     current_password: str
@@ -51,6 +79,21 @@ class SlotCreate(BaseModel):
     start_time: datetime = Field(..., json_schema_extra={"example": "2026-09-01T10:00:00Z"})
     end_time: datetime = Field(..., json_schema_extra={"example": "2026-09-01T11:00:00Z"})
     price: Decimal = Field(default=Decimal("0.00"), json_schema_extra={"example": "50.00"})
+    capacity: int = Field(default=1, ge=1, le=10000, json_schema_extra={"example": 1})
+
+class SlotUpdate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+    resource_id: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    price: Optional[Decimal] = Field(default=None, ge=0)
+    capacity: Optional[int] = Field(default=None, ge=1, le=10000)
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> "SlotUpdate":
+        if not self.model_fields_set:
+            raise ValueError("Provide at least one field to update")
+        return self
 
 class SlotResponse(BaseModel):
     id: str
@@ -59,6 +102,7 @@ class SlotResponse(BaseModel):
     start_time: datetime
     end_time: datetime
     price: Decimal
+    capacity: int = 1
     status: SlotStatus
 
     model_config = ConfigDict(from_attributes=True)
@@ -135,6 +179,7 @@ class MyOfferResponse(HoldResponse):
 
 class MyBookingResponse(BookingResponse):
     slot: SlotResponse
+    payment_status: Optional[PaymentStatus] = None
 
 
 class MyWaitlistEntryResponse(WaitlistResponse):
@@ -155,6 +200,11 @@ class BusinessStatsResponse(BaseModel):
     recovered_revenue: Decimal
 
 
+class BookingHolder(BaseModel):
+    booking_id: str
+    name: str
+
+
 class BusinessSlotResponse(BaseModel):
     id: str
     resource_id: str
@@ -162,11 +212,14 @@ class BusinessSlotResponse(BaseModel):
     end_time: datetime
     status: SlotStatus
     price: Decimal
+    capacity: int = 1
     waitlist_count: int
+    # First booking/hold are kept for backwards compatibility with single-seat views.
     active_booking_id: Optional[str] = None
     active_booking_holder_name: Optional[str] = None
     active_hold_holder_name: Optional[str] = None
     active_hold_expires_at: Optional[datetime] = None
+    booking_holders: List[BookingHolder] = []
 
 
 class BusinessWaitlistEntryResponse(BaseModel):
@@ -196,3 +249,98 @@ class BusinessBookingResponse(BaseModel):
     cancellation_reason: Optional[str] = None
     cancelled_by_role: Optional[str] = None
     slot_price: Decimal
+
+
+
+class NotificationResponse(BaseModel):
+    id: str
+    type: str
+    title: str
+    body: str
+    link: Optional[str] = None
+    created_at: datetime
+    read_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationListResponse(BaseModel):
+    unread_count: int
+    items: List[NotificationResponse]
+
+
+class PushKeys(BaseModel):
+    p256dh: str
+    auth: str
+
+
+class PushSubscribeRequest(BaseModel):
+    endpoint: str = Field(..., min_length=10)
+    keys: PushKeys
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+
+class PushConfigResponse(BaseModel):
+    enabled: bool
+    public_key: Optional[str] = None
+
+
+class PaymentConfigResponse(BaseModel):
+    enabled: bool
+    provider: str
+    key_id: Optional[str] = None
+    currency: str
+
+
+class CheckoutRequest(BaseModel):
+    slot_id: Optional[str] = None
+    hold_id: Optional[str] = None
+
+
+class CheckoutResponse(BaseModel):
+    payment_id: str
+    hold_id: str
+    provider: str
+    key_id: str
+    provider_order_id: str
+    amount: Decimal
+    amount_minor: int
+    currency: str
+    expires_at: datetime
+
+
+class ConfirmPaymentRequest(BaseModel):
+    payment_id: str
+    provider_order_id: str
+    provider_payment_id: str
+    signature: str
+
+
+class MockPaymentResponse(BaseModel):
+    provider_order_id: str
+    provider_payment_id: str
+    signature: str
+
+
+class PaymentResponse(BaseModel):
+    id: str
+    slot_id: str
+    booking_id: Optional[str] = None
+    amount: Decimal
+    currency: str
+    status: PaymentStatus
+    provider: str
+    created_at: datetime
+    paid_at: Optional[datetime] = None
+    refunded_at: Optional[datetime] = None
+    refund_reason: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BusinessPaymentResponse(PaymentResponse):
+    customer_name: str
+    resource_id: str

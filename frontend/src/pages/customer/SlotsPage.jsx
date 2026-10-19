@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import client from '../../api/client';
 import { useToast } from '../../context/useToast';
+import { useAuth } from '../../context/useAuth';
+import { checkoutAndPay } from '../../lib/payments';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
@@ -29,6 +31,7 @@ export default function SlotsPage() {
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
   const { success, error: toastError } = useToast();
+  const { user } = useAuth();
 
   const fetchSlots = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -53,12 +56,21 @@ export default function SlotsPage() {
   const handleBookNow = async (slot) => {
     setActionLoadingId(slot.id);
     try {
-      await client.post('/api/v1/bookings', { slot_id: slot.id });
+      try {
+        await client.post('/api/v1/bookings', { slot_id: slot.id });
+      } catch (err) {
+        if (err.response?.status !== 402) throw err;
+        // Paid slot: reserve the seat, collect payment, then the booking is confirmed.
+        await checkoutAndPay({ slotId: slot.id, user });
+      }
       success(`Booked slot for ${slot.resource_id}.`);
       await fetchSlots(true);
     } catch (err) {
-      const message = err.response?.data?.detail || 'Failed to book slot.';
-      toastError(message);
+      if (err.cancelled) {
+        toastError('Payment cancelled. Your seat was released.');
+      } else {
+        toastError(err.response?.data?.detail || err.message || 'Failed to book slot.');
+      }
       await fetchSlots(true);
     } finally {
       setActionLoadingId(null);
@@ -303,6 +315,13 @@ export default function SlotsPage() {
                             </span>
                           </div>
 
+                          {slot.capacity > 1 && (
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] text-zinc-500">Accommodates</span>
+                              <span className="font-medium text-zinc-800">{slot.capacity} people</span>
+                            </div>
+                          )}
+
                           <div className="flex items-center justify-between pt-1">
                             <span className="text-[11px] text-zinc-500">Session fee</span>
                             <span className="font-semibold text-zinc-900">
@@ -324,7 +343,7 @@ export default function SlotsPage() {
                             disabled={isProcessing}
                             onClick={() => handleBookNow(slot)}
                           >
-                            Book slot
+                            {Number(slot.price) > 0 ? 'Book & pay' : 'Book slot'}
                           </Button>
                         ) : isBookedOrHeld ? (
                           <Button

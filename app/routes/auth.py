@@ -1,10 +1,19 @@
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from app.schemas import PasswordChange, TokenResponse, UserLogin, UserRegister, UserResponse, UserUpdate
+from app.config import settings
+from app.schemas import (
+    ForgotPasswordRequest, MessageResponse, PasswordChange, ResetPasswordRequest, TokenResponse,
+    UserLogin, UserRegister, UserResponse, UserUpdate,
+)
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import User
+from app.models import PasswordResetToken, User
 from app.security import create_access_token, hash_password, verify_password
+from app.services import notification_service
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -61,7 +70,18 @@ def update_me(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> User:
-    current_user.name = update_in.name
+    updates = {k: getattr(update_in, k) for k in update_in.model_fields_set}
+    if not updates:
+        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+    if "name" in updates and updates["name"] is None:
+        raise HTTPException(status_code=422, detail="name cannot be null")
+    for key in ("notify_email", "notify_sms", "notify_push"):
+        if key in updates and updates[key] is None:
+            raise HTTPException(status_code=422, detail=f"{key} cannot be null")
+    if "phone" in updates:
+        updates["phone"] = updates["phone"] or None  # empty string clears the number
+    for key, value in updates.items():
+        setattr(current_user, key, value)
     db.commit()
     db.refresh(current_user)
     return current_user
@@ -80,3 +100,48 @@ def change_password(
     current_user.password_hash = hash_password(pw_in.new_password)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+def forgot_password(body: ForgotPasswordRequest, db: Session = Depends(get_db)) -> MessageResponse:
+    """Always answers the same way so the endpoint cannot be used to discover registered emails."""
+    generic = MessageResponse(message="If that email is registered, a reset link has been sent.")
+    user = db.query(User).filter(User.email == body.email.strip()).first()
+    if user is None:
+        return generic
+    now = datetime.now(timezone.utc)
+    for old in db.scalars(select(PasswordResetToken).where(
+            PasswordResetToken.user_id == user.id, PasswordResetToken.used_at.is_(None))).all():
+        old.used_at = now  # only the newest link works
+    token = secrets.token_urlsafe(32)
+    db.add(PasswordResetToken(
+        user_id=user.id, token_hash=_hash_token(token), created_at=now,
+        expires_at=now + timedelta(minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES),
+    ))
+    link = f"{settings.FRONTEND_URL.rstrip('/')}/reset-password?token={token}"
+    notification_service.notify_password_reset(db, user.id, link, now=now)
+    db.commit()
+    return generic
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+def reset_password(body: ResetPasswordRequest, db: Session = Depends(get_db)) -> MessageResponse:
+    now = datetime.now(timezone.utc)
+    record = db.scalars(select(PasswordResetToken).where(
+        PasswordResetToken.token_hash == _hash_token(body.token)).with_for_update()).first()
+    expires = record.expires_at if record and record.expires_at.tzinfo else (
+        record.expires_at.replace(tzinfo=timezone.utc) if record else None)
+    if record is None or record.used_at is not None or expires <= now:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired.")
+    user = db.get(User, record.user_id)
+    if user is None:
+        raise HTTPException(status_code=400, detail="This reset link is invalid or has expired.")
+    user.password_hash = hash_password(body.new_password)
+    record.used_at = now
+    db.commit()
+    return MessageResponse(message="Password updated. You can now sign in.")

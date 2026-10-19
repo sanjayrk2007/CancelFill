@@ -126,7 +126,11 @@ Hold, waitlist entry, and booking each have their own state machine. Allowed tra
 | Allocation | Automatic expiry via background scheduler | Done |
 | Allocation | Cascading offers to the next candidate | Done |
 | Concurrency | Atomic acceptance and race-condition prevention | Done |
-| Notifications | Email / SMS / push delivery of offers | Planned |
+| Business | Edit and remove slots; only while AVAILABLE, rejected with an explanation if booked or held (FR-07, FR-08) | Done |
+| Business | Slot capacity attribute (FR-06): how many people a slot accommodates; a slot still confirms for one customer | Done |
+| Auth | Password reset by emailed single-use link | Done |
+| Notifications | Email (SMTP), SMS (Twilio), Web Push, plus an in-app inbox; transactional outbox with retries | Done |
+| Payments | Razorpay checkout, signature + webhook verification, automatic refunds (mock gateway for dev) | Done |
 | Scaling | Distributed scheduler lock, caching | Planned |
 | Quality | CI pipeline, database migrations | Planned |
 
@@ -211,6 +215,17 @@ All passwords are `password123`.
 | Business | `dr_smith@example.com` |
 | Customer | `alice@example.com`, `bob@example.com`, `charlie@example.com` |
 
+### Upgrading an existing database
+```bash
+psql "$DATABASE_URL" -f migrations/002_capacity_notifications_payments.sql   # idempotent
+```
+
+### Notifications, password reset and payments
+All three work out of the box in development without any credentials:
+- **Email / SMS / push** are logged to the server console until configured (`SMTP_*`, `TWILIO_*`, `VAPID_*`). Password-reset links appear in the console email.
+- **Payments** are off by default (`PAYMENT_PROVIDER=none`, bookings behave as before). Set `PAYMENT_PROVIDER=mock` to try the full pay and refund flow with a fake gateway, or `razorpay` with `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET`. Point the Razorpay webhook at `POST /api/v1/payments/webhook` for the `payment.captured`, `refund.processed` and `refund.failed` events.
+- Free slots (price 0) never require payment.
+
 ### Configuration (`.env`)
 | Variable | Default | Purpose |
 | :--- | :--- | :--- |
@@ -220,6 +235,13 @@ All passwords are `password123`.
 | `SCHEDULER_INTERVAL_SECONDS` | `15` | How often expiry is checked |
 | `JWT_SECRET` | dev placeholder | **Change in any real deployment** |
 | `CORS_ORIGINS` | `http://localhost:5173` | Allowed frontend origins |
+| `FRONTEND_URL` | `http://localhost:5173` | Base URL used in password-reset links |
+| `PAYMENT_PROVIDER` | `none` | `none`, `mock` or `razorpay` |
+| `PAYMENT_WINDOW_SECONDS` | `600` | How long a seat is held while a customer pays |
+| `REFUND_CUTOFF_HOURS` | `24` | Customer cancellations earlier than this get a full refund |
+| `NOTIFICATION_DISPATCH_INTERVAL_SECONDS` | `5` | How often queued notifications and refunds are sent |
+
+See `.env.example` for the SMTP, Twilio, VAPID and Razorpay variables.
 
 ---
 
@@ -282,10 +304,14 @@ The project was built incrementally, with each phase delivering working, tested 
 
 ## 12. Known Limitations & Future Work
 
-- **Notifications:** offers are visible only inside the app. Email and SMS integration is planned.
+- **Notifications:** delivery runs from the same in-process scheduler as hold expiry, so it shares the single-instance limitation below. A channel with no credentials logs to the console instead of sending.
+- **Payments:** the Razorpay adapter is covered by mocked-HTTP tests, not against the live API. Run it against Razorpay test keys before going live. Customer cancellations are refunded only if made `REFUND_CUTOFF_HOURS` (default 24) before the slot starts; business cancellations and slot removals are always refunded in full.
+- **Capacity:** per the SRS a slot is one bookable unit (NFR-03), so `capacity` is descriptive (what the slot accommodates) and never allows a second booking or hold. Supporting several independent bookings per slot would be a deliberate change to NFR-03 and the Business Rules.
+- **Failed payments:** as SRS 3.12 requires, a customer who does not complete payment is treated as having declined the offer, and the next waitlisted customer is offered the slot. A single failed card attempt inside the Razorpay form is not final; the customer can retry until they close the form.
+- **Push channel:** push uses standard browser Web Push (VAPID). The SRS interface table (4.2) names FCM; swapping the sender in `notification_providers.py` is the only change needed.
 - **Scheduler scaling:** the in-process scheduler assumes a single instance. Multiple instances would need a distributed lock or a dedicated worker.
 - **Fairness model:** priority is strictly first-come, first-served, with no weighting.
-- **Schema management:** tables are created on startup, and `schema.sql` is a reference only. Migrations (for example Alembic) are planned.
+- **Schema management:** tables are created on startup but existing tables are never altered. Apply `migrations/*.sql` in order to an existing database (`schema.sql` is a generated reference). A migration tool such as Alembic is still planned.
 - **CI/CD:** tests run locally. A CI workflow with a PostgreSQL service container is planned.
 - **Security hardening:** token refresh, rate limiting, and secret management are needed before production use.
 

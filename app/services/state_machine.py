@@ -19,7 +19,7 @@ class ReasonRequired(ValueError):
 
 SLOT_TRANSITIONS: Dict[str, Set[str]] = {
     "AVAILABLE": {"BOOKED", "HELD", "CANCELLED"},
-    "BOOKED": {"AVAILABLE"},
+    "BOOKED": {"AVAILABLE", "CANCELLED"},
     "HELD": {"BOOKED", "AVAILABLE", "CANCELLED"},
 }
 

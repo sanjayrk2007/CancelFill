@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import client from '../api/client';
 import { NavLink, useNavigate, Outlet } from 'react-router-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -21,6 +22,8 @@ import {
   X,
   Layers,
   ChevronDown,
+  Bell,
+  Settings,
 } from 'lucide-react';
 
 export default function Layout() {
@@ -30,6 +33,24 @@ export default function Layout() {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
+
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return undefined;
+    let active = true;
+    const load = () =>
+      client
+        .get('/api/v1/notifications', { params: { unread_only: true, limit: 1 } })
+        .then((res) => active && setUnreadCount(res.data.unread_count))
+        .catch(() => {});
+    load();
+    const id = setInterval(load, 20000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [user]);
 
   const handleLogout = () => {
     logout();
@@ -101,6 +122,20 @@ export default function Layout() {
 
           {/* Right Header Area */}
           <div className="hidden md:flex items-center gap-3">
+            {user && (
+              <NavLink
+                to="/notifications"
+                aria-label={`Notifications${unreadCount ? `, ${unreadCount} unread` : ''}`}
+                className="relative p-1.5 rounded-md text-zinc-600 hover:text-zinc-900 hover:bg-zinc-100 transition-colors"
+              >
+                <Bell className="w-4 h-4" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </NavLink>
+            )}
             {user ? (
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger asChild>
@@ -140,6 +175,14 @@ export default function Layout() {
                     >
                       <UserIcon className="w-3.5 h-3.5 text-zinc-500" />
                       <span>Profile</span>
+                    </DropdownMenu.Item>
+
+                    <DropdownMenu.Item
+                      onSelect={() => navigate('/profile')}
+                      className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-zinc-700 rounded-md hover:bg-zinc-100 hover:text-zinc-900 cursor-pointer focus:outline-none focus:bg-zinc-100"
+                    >
+                      <Settings className="w-3.5 h-3.5 text-zinc-500" />
+                      <span>Settings &amp; notifications</span>
                     </DropdownMenu.Item>
 
                     <DropdownMenu.Separator className="h-px bg-zinc-100 my-1" />
@@ -226,6 +269,22 @@ export default function Layout() {
 
             {user ? (
               <div className="pt-2 border-t border-zinc-100 flex flex-col gap-1">
+                <NavLink
+                  to="/notifications"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                >
+                  <Bell className="w-4 h-4 text-zinc-500" />
+                  <span>Notifications{unreadCount > 0 ? ` (${unreadCount})` : ''}</span>
+                </NavLink>
+                <NavLink
+                  to="/profile"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-md text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                >
+                  <Settings className="w-4 h-4 text-zinc-500" />
+                  <span>Settings</span>
+                </NavLink>
                 <button
                   type="button"
                   onClick={() => {

@@ -7,6 +7,7 @@ from app.dependencies import require_customer
 from app.models import Hold, HoldStatus, User
 from app.schemas import HoldResponse, HoldExpiryCheckResponse, BookingResponse
 from app.services.allocation_service import accept_hold, decline_hold, expire_hold
+from app.services.payment_gateways import payment_required
 from app.services.state_machine import NotFoundError, OfferExpired, InvalidTransition
 
 router = APIRouter(prefix="/holds", tags=["Holds"])
@@ -17,6 +18,12 @@ def accept_hold_endpoint(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_customer)
 ) -> BookingResponse:
+    pending_hold = db.get(Hold, hold_id)
+    if pending_hold is not None and pending_hold.user_id == current_user.id and payment_required(pending_hold.slot):
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail="Payment is required to accept this offer. Start checkout via POST /api/v1/payments/checkout.",
+        )
     try:
         booking = accept_hold(db=db, hold_id=hold_id, user_id=current_user.id)
         return BookingResponse.model_validate(booking)

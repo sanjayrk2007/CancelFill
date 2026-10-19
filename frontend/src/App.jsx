@@ -7,6 +7,10 @@ import Spinner from './components/ui/Spinner';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import NotFound from './pages/NotFound';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
+import NotificationsPage from './pages/NotificationsPage';
+import ProfilePage from './pages/ProfilePage';
 
 import SlotsPage from './pages/customer/SlotsPage';
 import OffersPage from './pages/customer/OffersPage';
@@ -46,6 +50,26 @@ export default function App() {
         {/* Public auth routes */}
         <Route path="login" element={<Login />} />
         <Route path="register" element={<Register />} />
+        <Route path="forgot-password" element={<ForgotPassword />} />
+        <Route path="reset-password" element={<ResetPassword />} />
+
+        {/* Any signed-in user */}
+        <Route
+          path="notifications"
+          element={
+            <ProtectedRoute allowedRoles={['CUSTOMER', 'BUSINESS']}>
+              <NotificationsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="profile"
+          element={
+            <ProtectedRoute allowedRoles={['CUSTOMER', 'BUSINESS']}>
+              <ProfilePage />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Customer protected routes (P7b) */}
         <Route

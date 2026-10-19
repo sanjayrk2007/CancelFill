@@ -137,7 +137,14 @@ export default function BookingsPage() {
                       Booking #{booking.id}
                     </span>
                   </div>
+                  <div className="flex flex-col items-end gap-1">
                   <Badge status={booking.status} size="sm" />
+                  {booking.payment_status && (
+                    <Badge status={booking.payment_status} size="sm">
+                      {{ PAID: 'Paid', REFUND_PENDING: 'Refund pending', REFUNDED: 'Refunded', REFUND_FAILED: 'Refund failed' }[booking.payment_status] || booking.payment_status}
+                    </Badge>
+                  )}
+                  </div>
                 </div>
 
                 <div className="space-y-2.5 text-xs">

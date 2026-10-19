@@ -13,19 +13,19 @@ export default function Badge({
 
   const getStyles = () => {
     // 2. Status colors only on badges: AVAILABLE green, BOOKED slate, HELD amber, CONFIRMED green, CANCELLED red, EXPIRED/DECLINED slate, RECOVERED blue.
-    if (variant === 'green' || normalizedStatus === 'AVAILABLE' || normalizedStatus === 'CONFIRMED') {
+    if (variant === 'green' || normalizedStatus === 'AVAILABLE' || normalizedStatus === 'CONFIRMED' || normalizedStatus === 'PAID') {
       return {
         badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
         dot: 'bg-emerald-500',
       };
     }
-    if (variant === 'amber' || normalizedStatus === 'HELD' || normalizedStatus === 'OFFER ACTIVE') {
+    if (variant === 'amber' || normalizedStatus === 'HELD' || normalizedStatus === 'OFFER ACTIVE' || normalizedStatus === 'REFUND_PENDING') {
       return {
         badge: 'bg-amber-50 text-amber-700 border-amber-200',
         dot: 'bg-amber-500',
       };
     }
-    if (variant === 'red' || normalizedStatus === 'CANCELLED') {
+    if (variant === 'red' || normalizedStatus === 'CANCELLED' || normalizedStatus === 'REFUND_FAILED' || normalizedStatus === 'FAILED') {
       return {
         badge: 'bg-rose-50 text-rose-700 border-rose-200',
         dot: 'bg-rose-500',
@@ -41,6 +41,7 @@ export default function Badge({
       variant === 'slate' ||
       normalizedStatus === 'BOOKED' ||
       normalizedStatus === 'EXPIRED' ||
+      normalizedStatus === 'REFUNDED' ||
       normalizedStatus === 'DECLINED' ||
       normalizedStatus === 'WAITING' ||
       normalizedStatus === 'OFFERED'

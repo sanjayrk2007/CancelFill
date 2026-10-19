@@ -7,13 +7,16 @@ from sqlalchemy.orm import Session, aliased
 
 from app.database import get_db
 from app.dependencies import require_business
-from app.models import Booking, BookingSource, BookingStatus, Hold, HoldStatus, Slot, User, WaitlistEntry, WaitlistStatus
+from app.models import Booking, BookingSource, BookingStatus, Hold, HoldKind, HoldStatus, Payment, Slot, User, WaitlistEntry, WaitlistStatus
 from app.schemas import (
+    BookingHolder,
     BusinessBookingResponse,
+    BusinessPaymentResponse,
     BusinessSlotResponse,
     BusinessStatsResponse,
     BusinessWaitlistEntryResponse,
     BusinessWaitlistSlotResponse,
+    PaymentResponse,
 )
 
 
@@ -80,7 +83,7 @@ def business_stats(
         )
         .select_from(Hold)
         .join(Slot, Slot.id == Hold.slot_id)
-        .where(Slot.owner_id == current_user.id)
+        .where(Slot.owner_id == current_user.id, Hold.kind == HoldKind.OFFER.value)
     ).one()
 
     total_slots = int(slot_stats.total_slots or 0)
@@ -108,63 +111,59 @@ def business_slots(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_business),
 ) -> List[BusinessSlotResponse]:
-    booking_holder = aliased(User)
-    hold_holder = aliased(User)
-    waitlist_counts = (
-        select(WaitlistEntry.slot_id, func.count(WaitlistEntry.id).label("waitlist_count"))
-        .where(WaitlistEntry.status.in_([WaitlistStatus.WAITING.value, WaitlistStatus.OFFERED.value]))
-        .group_by(WaitlistEntry.slot_id)
-        .subquery()
-    )
-    active_bookings = (
-        select(Booking.id.label("booking_id"), Booking.slot_id, Booking.user_id)
-        .where(Booking.status == BookingStatus.CONFIRMED.value)
-        .subquery()
-    )
-    active_holds = (
-        select(Hold.slot_id, Hold.user_id, Hold.expires_at)
-        .where(Hold.status == HoldStatus.ACTIVE.value)
-        .subquery()
-    )
-    rows = db.execute(
-        select(
-            Slot.id,
-            Slot.resource_id,
-            Slot.start_time,
-            Slot.end_time,
-            Slot.status,
-            Slot.price,
-            func.coalesce(waitlist_counts.c.waitlist_count, 0).label("waitlist_count"),
-            active_bookings.c.booking_id,
-            booking_holder.name.label("booking_holder_name"),
-            hold_holder.name.label("hold_holder_name"),
-            active_holds.c.expires_at.label("hold_expires_at"),
+    slots = list(db.scalars(
+        select(Slot).where(Slot.owner_id == current_user.id).order_by(Slot.start_time.asc(), Slot.id.asc())
+    ).all())
+    slot_ids = [sl.id for sl in slots]
+    waitlist_counts: Dict[str, int] = {}
+    holders: Dict[str, List[BookingHolder]] = {}
+    holds: Dict[str, List[tuple]] = {}
+    if slot_ids:
+        waitlist_counts = dict(db.execute(
+            select(WaitlistEntry.slot_id, func.count(WaitlistEntry.id))
+            .where(
+                WaitlistEntry.slot_id.in_(slot_ids),
+                WaitlistEntry.status.in_([WaitlistStatus.WAITING.value, WaitlistStatus.OFFERED.value]),
+            )
+            .group_by(WaitlistEntry.slot_id)
+        ).all())
+        for slot_id, booking_id, name in db.execute(
+            select(Booking.slot_id, Booking.id, User.name)
+            .join(User, User.id == Booking.user_id)
+            .where(Booking.slot_id.in_(slot_ids), Booking.status == BookingStatus.CONFIRMED.value)
+            .order_by(Booking.booked_at.asc(), Booking.id.asc())
+        ).all():
+            holders.setdefault(slot_id, []).append(BookingHolder(booking_id=booking_id, name=name))
+        for slot_id, name, expires_at in db.execute(
+            select(Hold.slot_id, User.name, Hold.expires_at)
+            .join(User, User.id == Hold.user_id)
+            .where(Hold.slot_id.in_(slot_ids), Hold.status == HoldStatus.ACTIVE.value)
+            .order_by(Hold.expires_at.asc(), Hold.id.asc())
+        ).all():
+            holds.setdefault(slot_id, []).append((name, expires_at))
+
+    responses: List[BusinessSlotResponse] = []
+    for sl in slots:
+        slot_holders = holders.get(sl.id, [])
+        slot_holds = holds.get(sl.id, [])
+        responses.append(
+            BusinessSlotResponse(
+                id=sl.id,
+                resource_id=sl.resource_id,
+                start_time=sl.start_time,
+                end_time=sl.end_time,
+                status=sl.status,
+                price=sl.price,
+                capacity=sl.capacity,
+                waitlist_count=int(waitlist_counts.get(sl.id, 0)),
+                active_booking_id=slot_holders[0].booking_id if slot_holders else None,
+                active_booking_holder_name=slot_holders[0].name if slot_holders else None,
+                active_hold_holder_name=slot_holds[0][0] if slot_holds else None,
+                active_hold_expires_at=slot_holds[0][1] if slot_holds else None,
+                booking_holders=slot_holders,
+            )
         )
-        .select_from(Slot)
-        .outerjoin(waitlist_counts, waitlist_counts.c.slot_id == Slot.id)
-        .outerjoin(active_bookings, active_bookings.c.slot_id == Slot.id)
-        .outerjoin(booking_holder, booking_holder.id == active_bookings.c.user_id)
-        .outerjoin(active_holds, active_holds.c.slot_id == Slot.id)
-        .outerjoin(hold_holder, hold_holder.id == active_holds.c.user_id)
-        .where(Slot.owner_id == current_user.id)
-        .order_by(Slot.start_time.asc(), Slot.id.asc())
-    ).all()
-    return [
-        BusinessSlotResponse(
-            id=row.id,
-            resource_id=row.resource_id,
-            start_time=row.start_time,
-            end_time=row.end_time,
-            status=row.status,
-            price=row.price,
-            waitlist_count=int(row.waitlist_count or 0),
-            active_booking_id=row.booking_id,
-            active_booking_holder_name=row.booking_holder_name,
-            active_hold_holder_name=row.hold_holder_name,
-            active_hold_expires_at=row.hold_expires_at,
-        )
-        for row in rows
-    ]
+    return responses
 
 
 @router.get("/waitlist", response_model=List[BusinessWaitlistSlotResponse], summary="Business owned active waitlists")
@@ -265,4 +264,24 @@ def business_bookings(
             slot_price=row.slot_price,
         )
         for row in rows
+    ]
+
+
+@router.get("/payments", response_model=List[BusinessPaymentResponse], summary="Payments for my slots")
+def business_payments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_business),
+) -> List[BusinessPaymentResponse]:
+    rows = db.execute(
+        select(Payment, User.name, Slot.resource_id)
+        .join(Slot, Slot.id == Payment.slot_id)
+        .join(User, User.id == Payment.user_id)
+        .where(Slot.owner_id == current_user.id)
+        .order_by(Payment.created_at.desc(), Payment.id.asc())
+    ).all()
+    return [
+        BusinessPaymentResponse(
+            **PaymentResponse.model_validate(payment).model_dump(), customer_name=name, resource_id=resource_id
+        )
+        for payment, name, resource_id in rows
     ]

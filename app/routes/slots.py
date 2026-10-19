@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import require_business
 from app.models import Slot, User
-from app.schemas import SlotCreate, SlotResponse
+from app.schemas import SlotCreate, SlotResponse, SlotUpdate
+from app.services.slot_service import remove_slot, update_slot
+from app.services.state_machine import NotFoundError
 
 router = APIRouter(prefix="/slots", tags=["Slots"])
 
@@ -37,7 +39,8 @@ def create_slot(
         resource_id=slot_in.resource_id,
         start_time=slot_in.start_time,
         end_time=slot_in.end_time,
-        price=slot_in.price
+        price=slot_in.price,
+        capacity=slot_in.capacity
     )
     db.add(slot)
     db.commit()
@@ -53,3 +56,41 @@ def get_slot(slot_id: str, db: Session = Depends(get_db)) -> Slot:
     if not slot:
         raise HTTPException(status_code=404, detail=f"Slot '{slot_id}' not found")
     return slot
+
+
+@router.patch("/{slot_id}", response_model=SlotResponse, summary="Edit an unbooked slot (FR-07)")
+def edit_slot(
+    slot_id: str,
+    slot_in: SlotUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_business),
+) -> Slot:
+    changes = {k: getattr(slot_in, k) for k in slot_in.model_fields_set}
+    for key in ("resource_id", "start_time", "end_time", "price", "capacity"):
+        if key in changes and changes[key] is None:
+            raise HTTPException(status_code=422, detail=f"{key} cannot be null")
+    try:
+        slot = update_slot(db=db, slot_id=slot_id, owner_id=current_user.id, changes=changes)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    return slot
+
+
+@router.delete("/{slot_id}", response_model=SlotResponse, summary="Remove an unbooked slot (FR-08)")
+def delete_slot(
+    slot_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_business),
+) -> Slot:
+    try:
+        return remove_slot(db=db, slot_id=slot_id, owner_id=current_user.id)
+    except NotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))

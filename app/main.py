@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import Base, engine, get_db
-from app.routes import slots, waitlist, bookings, cancellations, holds, auth, me, business
+from app.routes import slots, waitlist, bookings, cancellations, holds, auth, me, business, notifications, payments
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -41,6 +41,8 @@ This API demonstrates the four completed Review-1 modules:
         {"name": "Bookings", "description": "Create and view initial bookings for demonstration"},
         {"name": "Cancellations", "description": "Cancel bookings and trigger recovery workflow"},
         {"name": "Holds", "description": "Inspect holds and evaluate timestamp expiry"},
+        {"name": "Notifications", "description": "In-app notifications and Web Push registration"},
+        {"name": "Payments", "description": "Checkout, confirmation, webhooks and refunds"},
     ],
     lifespan=lifespan
 )
@@ -62,6 +64,8 @@ app.include_router(cancellations.router, prefix=settings.API_V1_STR)
 app.include_router(holds.router, prefix=settings.API_V1_STR)
 app.include_router(me.router, prefix=settings.API_V1_STR)
 app.include_router(business.router, prefix=settings.API_V1_STR)
+app.include_router(notifications.router, prefix=settings.API_V1_STR)
+app.include_router(payments.router, prefix=settings.API_V1_STR)
 
 @app.get("/", tags=["System"])
 def root() -> Dict[str, str]:

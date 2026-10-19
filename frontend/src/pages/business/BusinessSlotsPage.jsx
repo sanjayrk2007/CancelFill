@@ -21,7 +21,18 @@ import {
   Users,
   ChevronDown,
   ChevronUp,
+  Pencil,
+  Trash2,
 } from 'lucide-react';
+
+const EMPTY_FORM = { resource_id: '', start_time: '', end_time: '', price: '', capacity: '1' };
+
+// ISO (UTC) -> value for <input type="datetime-local"> in the browser's timezone
+function toLocalInput(iso) {
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export default function BusinessSlotsPage() {
   useDocumentTitle('Business Slots');
@@ -34,20 +45,21 @@ export default function BusinessSlotsPage() {
   // Expanded rows set for waitlist preview
   const [expandedSlotIds, setExpandedSlotIds] = useState(new Set());
 
-  // Create Slot Dialog state
+  // Create / edit slot dialog state
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [formData, setFormData] = useState({
-    resource_id: '',
-    start_time: '',
-    end_time: '',
-    price: '',
-  });
+  const [editingSlot, setEditingSlot] = useState(null);
+  const [formData, setFormData] = useState(EMPTY_FORM);
   const [formErrors, setFormErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Cancel booking target state
-  const [cancelTargetSlot, setCancelTargetSlot] = useState(null);
+  // Cancel booking target: { bookingId, name, resource }
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
   const [isCancelling, setIsCancelling] = useState(false);
+
+  // Remove slot target (only unbooked slots can be removed, FR-08)
+  const [removeTarget, setRemoveTarget] = useState(null);
+  const [isRemoving, setIsRemoving] = useState(false);
 
   const { success, error: toastError } = useToast();
 
@@ -119,7 +131,27 @@ export default function BusinessSlotsPage() {
     }
   };
 
-  const handleCreateSlot = async (e) => {
+  const openCreate = () => {
+    setEditingSlot(null);
+    setFormData(EMPTY_FORM);
+    setFormErrors({});
+    setCreateDialogOpen(true);
+  };
+
+  const openEdit = (slot) => {
+    setEditingSlot(slot);
+    setFormData({
+      resource_id: slot.resource_id,
+      start_time: toLocalInput(slot.start_time),
+      end_time: toLocalInput(slot.end_time),
+      price: String(parseFloat(slot.price)),
+      capacity: String(slot.capacity ?? 1),
+    });
+    setFormErrors({});
+    setCreateDialogOpen(true);
+  };
+
+  const handleSaveSlot = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
     setFormErrors({});
@@ -128,21 +160,23 @@ export default function BusinessSlotsPage() {
       const startIso = formData.start_time ? new Date(formData.start_time).toISOString() : '';
       const endIso = formData.end_time ? new Date(formData.end_time).toISOString() : '';
       const priceNum = formData.price === '' ? 0 : parseFloat(formData.price);
-
-      await client.post('/api/v1/slots', {
+      const payload = {
         resource_id: formData.resource_id,
         start_time: startIso,
         end_time: endIso,
         price: isNaN(priceNum) ? 0 : priceNum,
-      });
+        capacity: Math.max(1, parseInt(formData.capacity, 10) || 1),
+      };
 
-      success(`Slot for "${formData.resource_id}" published successfully.`);
-      setFormData({
-        resource_id: '',
-        start_time: '',
-        end_time: '',
-        price: '',
-      });
+      if (editingSlot) {
+        await client.patch(`/api/v1/slots/${editingSlot.id}`, payload);
+        success(`Slot "${formData.resource_id}" updated.`);
+      } else {
+        await client.post('/api/v1/slots', payload);
+        success(`Slot for "${formData.resource_id}" published successfully.`);
+      }
+      setFormData(EMPTY_FORM);
+      setEditingSlot(null);
       setCreateDialogOpen(false);
       await fetchData(true);
     } catch (err) {
@@ -167,20 +201,42 @@ export default function BusinessSlotsPage() {
   };
 
   const handleConfirmCancelBooking = async () => {
-    if (!cancelTargetSlot?.active_booking_id) return;
+    if (!cancelTarget) return;
+    if (!cancelReason.trim()) {
+      toastError('Please enter a reason for cancelling.');
+      return;
+    }
     setIsCancelling(true);
     try {
-      const res = await client.post(`/api/v1/bookings/${cancelTargetSlot.active_booking_id}/cancel`);
+      const res = await client.post(`/api/v1/bookings/${cancelTarget.bookingId}/cancel`, {
+        reason: cancelReason.trim(),
+      });
       const msg = res.data?.candidate_selected
         ? 'Booking cancelled. Waitlist candidate has been automatically offered a temporary hold.'
         : 'Booking cancelled successfully.';
       success(msg);
-      setCancelTargetSlot(null);
+      setCancelTarget(null);
+      setCancelReason('');
       await fetchData(true);
     } catch (err) {
       toastError(err.response?.data?.detail || 'Failed to cancel booking.');
     } finally {
       setIsCancelling(false);
+    }
+  };
+
+  const handleConfirmRemoveSlot = async () => {
+    if (!removeTarget) return;
+    setIsRemoving(true);
+    try {
+      await client.delete(`/api/v1/slots/${removeTarget.id}`);
+      success(`Slot "${removeTarget.resource_id}" removed.`);
+      setRemoveTarget(null);
+      await fetchData(true);
+    } catch (err) {
+      toastError(err.response?.data?.detail || 'Failed to remove slot.');
+    } finally {
+      setIsRemoving(false);
     }
   };
 
@@ -213,7 +269,7 @@ export default function BusinessSlotsPage() {
             variant="primary"
             size="sm"
             icon={Plus}
-            onClick={() => setCreateDialogOpen(true)}
+            onClick={openCreate}
           >
             Create slot
           </Button>
@@ -242,7 +298,7 @@ export default function BusinessSlotsPage() {
           title="No slots created yet"
           description="Publish your first resource opening using the Create Slot dialog to start accepting bookings and waitlists."
           action={
-            <Button variant="primary" size="sm" onClick={() => setCreateDialogOpen(true)}>
+            <Button variant="primary" size="sm" onClick={openCreate}>
               Create first slot
             </Button>
           }
@@ -255,6 +311,7 @@ export default function BusinessSlotsPage() {
               <TableHead>Time Range</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Price</TableHead>
+              <TableHead>Capacity</TableHead>
               <TableHead>Current Holder</TableHead>
               <TableHead>Offer Holder / Countdown</TableHead>
               <TableHead align="center">Waitlist</TableHead>
@@ -263,8 +320,10 @@ export default function BusinessSlotsPage() {
           </TableHeader>
           <TableBody>
             {slots.map((slot) => {
-              const isBooked = slot.status === 'BOOKED';
+              const holders = slot.booking_holders || [];
               const isHeld = slot.status === 'HELD';
+              const isRemoved = slot.status === 'CANCELLED';
+              const canModify = slot.status === 'AVAILABLE'; // FR-07 / FR-08
               const isExpanded = expandedSlotIds.has(slot.id);
               const slotWaitlist = waitlistMap[slot.id] || [];
 
@@ -305,12 +364,24 @@ export default function BusinessSlotsPage() {
                       </span>
                     </TableCell>
 
-                    {/* Current Holder */}
+                    {/* Capacity (descriptive: people the slot accommodates) */}
                     <TableCell>
-                      {isBooked ? (
-                        <span className="font-medium text-zinc-900">
-                          {slot.active_booking_holder_name || 'Booked Client'}
-                        </span>
+                      <span className="font-medium text-zinc-900">{slot.capacity}</span>
+                    </TableCell>
+
+                    {/* Current Holders */}
+                    <TableCell>
+                      {holders.length > 0 ? (
+                        <div className="flex flex-col">
+                          {holders.slice(0, 3).map((h) => (
+                            <span key={h.booking_id} className="font-medium text-zinc-900">
+                              {h.name}
+                            </span>
+                          ))}
+                          {holders.length > 3 && (
+                            <span className="text-[11px] text-zinc-500">+{holders.length - 3} more</span>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-zinc-400">—</span>
                       )}
@@ -382,15 +453,44 @@ export default function BusinessSlotsPage() {
                               {isExpanded ? 'Hide waitlist' : 'View waitlist'}
                             </DropdownMenu.Item>
 
-                            {isBooked && (
+                            {!isRemoved && (
+                              <DropdownMenu.Item
+                                disabled={!canModify}
+                                onSelect={() => openEdit(slot)}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-zinc-100 text-zinc-700 cursor-pointer focus:outline-none focus:bg-zinc-100 data-[disabled]:opacity-40 data-[disabled]:cursor-not-allowed"
+                              >
+                                <Pencil className="w-3 h-3" /> Edit slot
+                              </DropdownMenu.Item>
+                            )}
+
+                            {holders.length > 0 && <DropdownMenu.Separator className="h-px bg-zinc-100 my-1" />}
+                            {holders.map((h) => (
+                              <DropdownMenu.Item
+                                key={h.booking_id}
+                                onSelect={() =>
+                                  setCancelTarget({ bookingId: h.booking_id, name: h.name, resource: slot.resource_id })
+                                }
+                                className="px-2.5 py-1.5 rounded-md hover:bg-rose-50 text-rose-600 cursor-pointer focus:outline-none focus:bg-rose-50"
+                              >
+                                Cancel booking · {h.name}
+                              </DropdownMenu.Item>
+                            ))}
+
+                            {!isRemoved && (
                               <>
                                 <DropdownMenu.Separator className="h-px bg-zinc-100 my-1" />
                                 <DropdownMenu.Item
-                                  onSelect={() => setCancelTargetSlot(slot)}
-                                  className="px-2.5 py-1.5 rounded-md hover:bg-rose-50 text-rose-600 cursor-pointer focus:outline-none focus:bg-rose-50"
+                                  disabled={!canModify}
+                                  onSelect={() => setRemoveTarget(slot)}
+                                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-md hover:bg-rose-50 text-rose-600 cursor-pointer focus:outline-none focus:bg-rose-50 data-[disabled]:opacity-40 data-[disabled]:cursor-not-allowed"
                                 >
-                                  Cancel booking
+                                  <Trash2 className="w-3 h-3" /> Remove slot
                                 </DropdownMenu.Item>
+                                {!canModify && (
+                                  <div className="px-2.5 py-1.5 text-[11px] text-zinc-400 max-w-[200px] leading-snug">
+                                    Booked or held slots can&apos;t be edited or removed. Cancel the booking first.
+                                  </div>
+                                )}
                               </>
                             )}
                           </DropdownMenu.Content>
@@ -402,7 +502,7 @@ export default function BusinessSlotsPage() {
                   {/* Expanded Waitlist View */}
                   {isExpanded && (
                     <TableRow hover={false} className="bg-zinc-50/70 border-b border-zinc-200">
-                      <td colSpan={8} className="px-6 py-4">
+                      <td colSpan={9} className="px-6 py-4">
                         <div className="space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="text-xs font-semibold text-zinc-700 uppercase tracking-wider">
@@ -465,10 +565,12 @@ export default function BusinessSlotsPage() {
             <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
               <div>
                 <DialogPrimitive.Title className="text-base font-semibold text-zinc-900">
-                  Create Time Slot
+                  {editingSlot ? 'Edit Time Slot' : 'Create Time Slot'}
                 </DialogPrimitive.Title>
                 <DialogPrimitive.Description className="text-xs text-zinc-500 mt-0.5">
-                  Publish a resource opening with start/end time and price.
+                  {editingSlot
+                    ? 'Only unbooked slots can be edited.'
+                    : 'Publish a resource opening with start/end time, price and capacity.'}
                 </DialogPrimitive.Description>
               </div>
               <DialogPrimitive.Close asChild>
@@ -489,7 +591,7 @@ export default function BusinessSlotsPage() {
               </div>
             )}
 
-            <form onSubmit={handleCreateSlot} className="mt-4 space-y-3.5">
+            <form onSubmit={handleSaveSlot} className="mt-4 space-y-3.5">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1">
                   Resource Name *
@@ -543,6 +645,25 @@ export default function BusinessSlotsPage() {
 
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1">
+                  Capacity (people it accommodates)
+                </label>
+                <input
+                  type="number"
+                  step="1"
+                  min="1"
+                  max="10000"
+                  required
+                  value={formData.capacity}
+                  onChange={(e) => handleInputChange('capacity', e.target.value)}
+                  className="w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+                {formErrors.capacity && (
+                  <p className="mt-1 text-xs text-rose-600">{formErrors.capacity}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1">
                   Price (INR ₹)
                 </label>
                 <input
@@ -574,7 +695,7 @@ export default function BusinessSlotsPage() {
                   size="sm"
                   isLoading={isSubmitting}
                 >
-                  Publish Slot
+                  {editingSlot ? 'Save changes' : 'Publish Slot'}
                 </Button>
               </div>
             </form>
@@ -582,19 +703,27 @@ export default function BusinessSlotsPage() {
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>
 
-      {/* CONFIRM DIALOG: CANCEL BOOKING */}
+      {/* CONFIRM DIALOG: CANCEL BOOKING (business must give a reason) */}
       <ConfirmDialog
-        isOpen={Boolean(cancelTargetSlot)}
+        isOpen={Boolean(cancelTarget)}
         title="Cancel Client Booking?"
         description={
-          cancelTargetSlot ? (
-            <span>
-              Are you sure you want to cancel the booking for{' '}
-              <strong className="text-zinc-900 font-semibold">
-                {cancelTargetSlot.active_booking_holder_name || 'this client'}
-              </strong>{' '}
-              on resource <strong className="text-zinc-900 font-semibold">{cancelTargetSlot.resource_id}</strong>?
-              The system will automatically dispatch an offer to the next waitlisted customer.
+          cancelTarget ? (
+            <span className="block space-y-3">
+              <span className="block">
+                Cancel the booking for{' '}
+                <strong className="text-zinc-900 font-semibold">{cancelTarget.name}</strong> on{' '}
+                <strong className="text-zinc-900 font-semibold">{cancelTarget.resource}</strong>? Any payment is
+                refunded in full and the next waitlisted customer is offered the seat.
+              </span>
+              <textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                maxLength={500}
+                rows={2}
+                placeholder="Reason (shown to the customer) *"
+                className="block w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
+              />
             </span>
           ) : (
             'Are you sure you want to cancel this booking?'
@@ -605,7 +734,34 @@ export default function BusinessSlotsPage() {
         confirmVariant="danger"
         isLoading={isCancelling}
         onConfirm={handleConfirmCancelBooking}
-        onClose={() => !isCancelling && setCancelTargetSlot(null)}
+        onClose={() => {
+          if (!isCancelling) {
+            setCancelTarget(null);
+            setCancelReason('');
+          }
+        }}
+      />
+
+      {/* CONFIRM DIALOG: REMOVE SLOT (only offered for unbooked slots) */}
+      <ConfirmDialog
+        isOpen={Boolean(removeTarget)}
+        title="Remove this slot?"
+        description={
+          removeTarget ? (
+            <span>
+              <strong className="text-zinc-900 font-semibold">{removeTarget.resource_id}</strong> will be
+              removed and can no longer be booked. This cannot be undone.
+            </span>
+          ) : (
+            ''
+          )
+        }
+        confirmText="Remove slot"
+        cancelText="Keep slot"
+        confirmVariant="danger"
+        isLoading={isRemoving}
+        onConfirm={handleConfirmRemoveSlot}
+        onClose={() => !isRemoving && setRemoveTarget(null)}
       />
     </div>
   );

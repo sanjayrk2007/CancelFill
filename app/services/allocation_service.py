@@ -1,10 +1,11 @@
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import (
+    HoldKind,
     Slot,
     SlotStatus,
     WaitlistEntry,
@@ -18,6 +19,8 @@ from app.models import (
 )
 
 logger = logging.getLogger(__name__)
+from app.services import notification_service as notifications
+from app.services import payment_ledger
 from app.services.state_machine import (
     assert_transition,
     InvalidTransition,
@@ -26,12 +29,67 @@ from app.services.state_machine import (
     ReasonRequired,
 )
 
+# A slot is one bookable unit (SRS 1.4, NFR-03): it can never confirm for more than one customer.
+# `Slot.capacity` is descriptive and deliberately plays no part in allocation.
+SEATS_PER_SLOT = 1
+
+
+class AlreadyHolding(ValueError):
+    """The customer already has a confirmed booking or an active hold on this slot."""
+
+
+def _seat_counts(db: Session, slot: Slot) -> Tuple[int, int]:
+    """(confirmed bookings, active holds) for a slot. Callers must hold the slot row lock."""
+    db.flush()
+    confirmed = db.scalar(
+        select(func.count(Booking.id)).where(
+            Booking.slot_id == slot.id, Booking.status == BookingStatus.CONFIRMED.value
+        )
+    ) or 0
+    holds = db.scalar(
+        select(func.count(Hold.id)).where(Hold.slot_id == slot.id, Hold.status == HoldStatus.ACTIVE.value)
+    ) or 0
+    return int(confirmed), int(holds)
+
+
+def free_seats(db: Session, slot: Slot) -> int:
+    confirmed, holds = _seat_counts(db, slot)
+    return SEATS_PER_SLOT - confirmed - holds
+
+
+def _set_slot_status(slot: Slot, target: str) -> None:
+    current = slot.status
+    if current == target:
+        return
+    try:
+        assert_transition("Slot", current, target)
+    except InvalidTransition:
+        # e.g. BOOKED -> HELD: a seat is freed and immediately re-held, so pass through AVAILABLE.
+        assert_transition("Slot", current, SlotStatus.AVAILABLE.value)
+        assert_transition("Slot", SlotStatus.AVAILABLE.value, target)
+    slot.status = target
+
+
+def sync_slot_status(db: Session, slot: Slot) -> None:
+    """Derive slot status from seat usage: free seat -> AVAILABLE, full with holds -> HELD, full -> BOOKED."""
+    if slot.status == SlotStatus.CANCELLED.value:
+        return
+    confirmed, holds = _seat_counts(db, slot)
+    if SEATS_PER_SLOT - confirmed - holds > 0:
+        target = SlotStatus.AVAILABLE.value
+    elif holds > 0:
+        target = SlotStatus.HELD.value
+    else:
+        target = SlotStatus.BOOKED.value
+    _set_slot_status(slot, target)
+
+
 def _offer_next_candidate(
     db: Session,
     slot: Slot,
     current_time: datetime
 ) -> Tuple[Optional[Hold], Optional[WaitlistEntry]]:
-    if slot.status != SlotStatus.AVAILABLE.value:
+    if slot.status == SlotStatus.CANCELLED.value or free_seats(db, slot) <= 0:
         return None, None
     entry = db.scalars(
         select(WaitlistEntry)
@@ -45,20 +103,36 @@ def _offer_next_candidate(
         return None, None
     assert_transition("WaitlistEntry", entry.status, WaitlistStatus.OFFERED.value)
     entry.status = WaitlistStatus.OFFERED.value
-    assert_transition("Slot", slot.status, SlotStatus.HELD.value)
-    slot.status = SlotStatus.HELD.value
     expires_at = current_time + timedelta(seconds=settings.DEFAULT_HOLD_DURATION_SECONDS)
     hold = Hold(
         slot_id=slot.id,
         user_id=entry.user_id,
         created_at=current_time,
         expires_at=expires_at,
-        status=HoldStatus.ACTIVE.value
+        status=HoldStatus.ACTIVE.value,
+        kind=HoldKind.OFFER.value,
     )
     db.add(hold)
     db.flush()
+    sync_slot_status(db, slot)
+    notifications.notify_offer_created(db, hold, slot, now=current_time)
     logger.info("offer_created hold_id=%s slot_id=%s user_id=%s", hold.id, hold.slot_id, hold.user_id)
     return hold, entry
+
+
+def offer_all_candidates(
+    db: Session,
+    slot: Slot,
+    current_time: datetime
+) -> Tuple[Optional[Hold], Optional[WaitlistEntry]]:
+    """Offer the freed slot to the next waiting customer. Returns the offer made, if any."""
+    first: Tuple[Optional[Hold], Optional[WaitlistEntry]] = (None, None)
+    while True:
+        hold, entry = _offer_next_candidate(db, slot, current_time)
+        if hold is None:
+            return first
+        if first[0] is None:
+            first = (hold, entry)
 
 def book_slot(
     db: Session,
@@ -72,7 +146,22 @@ def book_slot(
             raise NotFoundError(f"Slot '{slot_id}' not found.")
         if slot.status != SlotStatus.AVAILABLE.value:
             raise InvalidTransition("Slot", slot.status, SlotStatus.BOOKED.value)
-        assert_transition("Slot", slot.status, SlotStatus.BOOKED.value)
+        existing_booking = db.scalars(
+            select(Booking).where(
+                Booking.slot_id == slot.id,
+                Booking.user_id == user_id,
+                Booking.status == BookingStatus.CONFIRMED.value,
+            )
+        ).first()
+        existing_hold = db.scalars(
+            select(Hold).where(
+                Hold.slot_id == slot.id,
+                Hold.user_id == user_id,
+                Hold.status == HoldStatus.ACTIVE.value,
+            )
+        ).first()
+        if existing_booking or existing_hold:
+            raise AlreadyHolding("You already have a booking or a pending offer for this slot.")
         current_time = now or datetime.now(timezone.utc)
         booking = Booking(
             slot_id=slot.id,
@@ -82,8 +171,9 @@ def book_slot(
             source=BookingSource.DIRECT.value,
             recovered_from_booking_id=None
         )
-        slot.status = SlotStatus.BOOKED.value
         db.add(booking)
+        sync_slot_status(db, slot)
+        notifications.notify_booking_confirmed(db, booking, slot, now=current_time)
         db.commit()
         db.refresh(booking)
         return booking
@@ -114,10 +204,12 @@ def cancel_booking(
         booking.status = BookingStatus.CANCELLED.value
         booking.cancellation_reason = reason
         booking.cancelled_by_role = "BUSINESS" if slot.owner_id == actor_id else "CUSTOMER"
-        assert_transition("Slot", slot.status, SlotStatus.AVAILABLE.value)
-        slot.status = SlotStatus.AVAILABLE.value
         current_time = now or datetime.now(timezone.utc)
-        hold, earliest_candidate = _offer_next_candidate(db, slot, current_time)
+        sync_slot_status(db, slot)
+        by_business = slot.owner_id == actor_id
+        payment_ledger.refund_for_cancelled_booking(db, booking, slot, by_business=by_business, now=current_time)
+        notifications.notify_booking_cancelled(db, booking, slot, reason, by_business=by_business, now=current_time)
+        hold, earliest_candidate = offer_all_candidates(db, slot, current_time)
         db.commit()
         db.refresh(booking)
         if hold:
@@ -150,7 +242,8 @@ def offer_next_candidate(
         if not slot:
             raise NotFoundError(f"Slot '{slot_id}' not found.")
         current_time = now or datetime.now(timezone.utc)
-        hold, _ = _offer_next_candidate(db, slot, current_time)
+        sync_slot_status(db, slot)
+        hold, _ = offer_all_candidates(db, slot, current_time)
         db.commit()
         if hold:
             db.refresh(hold)
@@ -190,9 +283,9 @@ def accept_hold(
             if entry:
                 assert_transition("WaitlistEntry", entry.status, WaitlistStatus.EXPIRED.value)
                 entry.status = WaitlistStatus.EXPIRED.value
-            assert_transition("Slot", slot.status, SlotStatus.AVAILABLE.value)
-            slot.status = SlotStatus.AVAILABLE.value
-            _offer_next_candidate(db, slot, current_time)
+            payment_ledger.close_payments_for_hold(db, hold.id)
+            sync_slot_status(db, slot)
+            offer_all_candidates(db, slot, current_time)
             db.commit()
             raise OfferExpired("This offer is no longer available")
         assert_transition("Hold", hold.status, HoldStatus.CONFIRMED.value)
@@ -207,8 +300,7 @@ def accept_hold(
         if entry:
             assert_transition("WaitlistEntry", entry.status, WaitlistStatus.CONFIRMED.value)
             entry.status = WaitlistStatus.CONFIRMED.value
-        assert_transition("Slot", slot.status, SlotStatus.BOOKED.value)
-        slot.status = SlotStatus.BOOKED.value
+        is_recovery = hold.kind == HoldKind.OFFER.value
         prev_booking = db.scalars(
             select(Booking)
             .where(
@@ -216,16 +308,18 @@ def accept_hold(
                 Booking.status == BookingStatus.CANCELLED.value
             )
             .order_by(Booking.booked_at.desc())
-        ).first()
+        ).first() if is_recovery else None
         booking = Booking(
             slot_id=slot.id,
             user_id=user_id,
             booked_at=current_time,
             status=BookingStatus.CONFIRMED.value,
-            source=BookingSource.RECOVERED.value,
+            source=BookingSource.RECOVERED.value if is_recovery else BookingSource.DIRECT.value,
             recovered_from_booking_id=prev_booking.id if prev_booking else None
         )
         db.add(booking)
+        sync_slot_status(db, slot)
+        notifications.notify_booking_confirmed(db, booking, slot, now=current_time)
         db.commit()
         db.refresh(booking)
         return booking
@@ -262,10 +356,10 @@ def decline_hold(
         if entry:
             assert_transition("WaitlistEntry", entry.status, WaitlistStatus.DECLINED.value)
             entry.status = WaitlistStatus.DECLINED.value
-        assert_transition("Slot", slot.status, SlotStatus.AVAILABLE.value)
-        slot.status = SlotStatus.AVAILABLE.value
+        payment_ledger.close_payments_for_hold(db, hold.id)
         current_time = now or datetime.now(timezone.utc)
-        _offer_next_candidate(db, slot, current_time)
+        sync_slot_status(db, slot)
+        offer_all_candidates(db, slot, current_time)
         db.commit()
         db.refresh(hold)
         return hold
@@ -298,10 +392,12 @@ def expire_hold(
         if entry:
             assert_transition("WaitlistEntry", entry.status, WaitlistStatus.EXPIRED.value)
             entry.status = WaitlistStatus.EXPIRED.value
-        assert_transition("Slot", slot.status, SlotStatus.AVAILABLE.value)
-        slot.status = SlotStatus.AVAILABLE.value
+        payment_ledger.close_payments_for_hold(db, hold.id)
         current_time = now or datetime.now(timezone.utc)
-        _offer_next_candidate(db, slot, current_time)
+        if hold.kind == HoldKind.OFFER.value:
+            notifications.notify_offer_expired(db, hold, slot, now=current_time)
+        sync_slot_status(db, slot)
+        offer_all_candidates(db, slot, current_time)
         db.commit()
         db.refresh(hold)
         return hold
@@ -423,6 +519,7 @@ def cancel_past_slot(
         if start > current_time or slot.status not in (SlotStatus.AVAILABLE.value, SlotStatus.HELD.value):
             db.rollback()
             return False
+        has_bookings = _seat_counts(db, slot)[0] > 0
         for hold in db.scalars(
             select(Hold).where(Hold.slot_id == slot.id, Hold.status == HoldStatus.ACTIVE.value)
         ).all():
@@ -441,6 +538,14 @@ def cancel_past_slot(
             )
             assert_transition("WaitlistEntry", entry.status, target)
             entry.status = target
+        for hold in db.scalars(select(Hold).where(Hold.slot_id == slot.id)).all():
+            payment_ledger.close_payments_for_hold(db, hold.id)
+        if has_bookings:
+            # A started session with confirmed bookings is a completed appointment, not an empty slot.
+            db.flush()
+            _set_slot_status(slot, SlotStatus.BOOKED.value)
+            db.commit()
+            return False
         assert_transition("Slot", slot.status, SlotStatus.CANCELLED.value)
         slot.status = SlotStatus.CANCELLED.value
         logger.info("past_slot_cancelled slot_id=%s", slot.id)

@@ -3,6 +3,7 @@ import { OffersContext } from './OffersContextDef';
 import client from '../api/client';
 import { useAuth } from './useAuth';
 import { useToast } from './useToast';
+import { checkoutAndPay } from '../lib/payments';
 
 export function OffersProvider({ children }) {
   const { user, role } = useAuth();
@@ -66,16 +67,26 @@ export function OffersProvider({ children }) {
     setInFlightIds((prev) => new Set(prev).add(offerId));
 
     try {
-      const response = await client.post(`/api/v1/holds/${offerId}/accept`);
+      let booking;
+      try {
+        booking = (await client.post(`/api/v1/holds/${offerId}/accept`)).data;
+      } catch (err) {
+        if (err.response?.status !== 402) throw err;
+        booking = await checkoutAndPay({ holdId: offerId, user });
+      }
       success('Offer accepted! Your booking has been confirmed.');
       await fetchOffers();
-      return response.data;
+      return booking;
     } catch (err) {
-      if (err.response && err.response.status === 409) {
-        toastError('This offer is no longer available');
+      if (err.cancelled) {
+        // Payment not completed counts as declining (SRS 3.12): the offer moves to the next person.
+        toastError('Payment not completed, so the offer was released to the next person on the waitlist.');
+        await fetchOffers();
+      } else if (err.response && err.response.status === 409) {
+        toastError(err.response.data?.detail || 'This offer is no longer available');
         await fetchOffers();
       } else {
-        const msg = err.response?.data?.detail || 'Failed to accept offer.';
+        const msg = err.response?.data?.detail || err.message || 'Failed to accept offer.';
         toastError(msg);
       }
       throw err;
@@ -86,7 +97,7 @@ export function OffersProvider({ children }) {
         return next;
       });
     }
-  }, [fetchOffers, success, toastError]);
+  }, [fetchOffers, success, toastError, user]);
 
   const declineOffer = useCallback(async (offerId) => {
     if (inFlightRef.current.has(offerId)) {

@@ -70,6 +70,11 @@ export function AuthProvider({ children }) {
     setRole(null);
   };
 
+  const updateUser = (nextUser) => {
+    setUser(nextUser);
+    setRole(nextUser.role);
+  };
+
   const value = {
     user,
     role,
@@ -77,6 +82,7 @@ export function AuthProvider({ children }) {
     login,
     logout,
     register,
+    updateUser,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

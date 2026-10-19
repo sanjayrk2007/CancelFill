@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import require_customer
 from app.models import (
-    Booking, BookingSource, BookingStatus, Hold, HoldStatus, Slot, User, WaitlistEntry, WaitlistStatus
+    Booking, BookingSource, BookingStatus, Hold, HoldKind, HoldStatus, Payment, PaymentStatus, Slot, User, WaitlistEntry, WaitlistStatus
 )
 from app.schemas import CustomerStatsResponse, MyBookingResponse, MyOfferResponse, MyWaitlistEntryResponse, SlotResponse
 from app.services.allocation_service import expire_hold
@@ -31,6 +31,7 @@ def my_offers(
             select(Hold).where(
                 Hold.user_id == current_user.id,
                 Hold.status == HoldStatus.ACTIVE.value,
+                Hold.kind == HoldKind.OFFER.value,
                 Hold.expires_at <= current_time,
             )
         ).all()
@@ -43,6 +44,7 @@ def my_offers(
             select(Hold).where(
                 Hold.user_id == current_user.id,
                 Hold.status == HoldStatus.ACTIVE.value,
+                Hold.kind == HoldKind.OFFER.value,
             ).order_by(Hold.expires_at.asc(), Hold.id.asc())
         ).all()
     )
@@ -74,8 +76,16 @@ def my_bookings(
             select(Booking).where(Booking.user_id == current_user.id).order_by(Booking.booked_at.desc(), Booking.id.asc())
         ).all()
     )
+    payment_status = {
+        row.booking_id: row.status
+        for row in db.execute(
+            select(Payment.booking_id, Payment.status).where(
+                Payment.user_id == current_user.id, Payment.booking_id.is_not(None))
+        ).all()
+    }
     return [
         MyBookingResponse(
+            payment_status=payment_status.get(booking.id),
             id=booking.id,
             slot_id=booking.slot_id,
             user_id=booking.user_id,
@@ -171,7 +181,7 @@ def my_stats(
     hold_counts = dict(
         db.execute(
             select(Hold.status, func.count(Hold.id))
-            .where(Hold.user_id == current_user.id)
+            .where(Hold.user_id == current_user.id, Hold.kind == HoldKind.OFFER.value)
             .group_by(Hold.status)
         ).all()
     )

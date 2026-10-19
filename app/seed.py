@@ -69,7 +69,18 @@ def seed_database() -> None:
             status=SlotStatus.AVAILABLE.value
         )
 
-        db.add_all([slot1, slot2])
+        slot3 = Slot(
+            id="slot-demo-3",
+            owner_id=biz_user.id,
+            resource_id="Group_Yoga_Class_6PM",
+            start_time=now + timedelta(hours=26),
+            end_time=now + timedelta(hours=27),
+            price=Decimal("20.00"),
+            capacity=8,
+            status=SlotStatus.AVAILABLE.value
+        )
+
+        db.add_all([slot1, slot2, slot3])
         db.commit()
 
         booking1 = Booking(
@@ -110,6 +121,7 @@ def seed_database() -> None:
         print(f"Slot 1 ID (Booked):         {slot1.id}")
         print(f"Booking ID (to Cancel):    {booking1.id} (User: {booking1.user_id})")
         print(f"Slot 2 ID (Available):      {slot2.id}")
+        print(f"Slot 3 ID (8-seat class):   {slot3.id}")
         print("=" * 60)
 
     finally:

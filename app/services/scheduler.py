@@ -8,6 +8,8 @@ from app.config import settings
 from app.database import SessionLocal
 from app.models import Hold, HoldStatus, Slot, SlotStatus
 from app.services.allocation_service import cancel_past_slot, expire_hold
+from app.services.notification_service import dispatch_pending
+from app.services.payment_service import process_pending_refunds
 
 try:
     from apscheduler.schedulers.background import BackgroundScheduler
@@ -77,6 +79,30 @@ def cancel_past_slots(now: Optional[datetime] = None) -> int:
     return cancelled
 
 
+def dispatch_notifications() -> int:
+    db = SessionLocal()
+    try:
+        return dispatch_pending(db)
+    except Exception:
+        logger.exception("notification_dispatch_failed")
+        db.rollback()
+        return 0
+    finally:
+        db.close()
+
+
+def run_pending_refunds() -> int:
+    db = SessionLocal()
+    try:
+        return process_pending_refunds(db)
+    except Exception:
+        logger.exception("refund_processing_failed")
+        db.rollback()
+        return 0
+    finally:
+        db.close()
+
+
 def start_scheduler() -> None:
     global scheduler
     if not settings.SCHEDULER_ENABLED:
@@ -106,6 +132,16 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    for func, job_id in ((dispatch_notifications, "dispatch_notifications"), (run_pending_refunds, "process_refunds")):
+        scheduler.add_job(
+            func,
+            "interval",
+            seconds=settings.NOTIFICATION_DISPATCH_INTERVAL_SECONDS,
+            id=job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
     scheduler.start()
     logger.info("scheduler_started interval_seconds=%s", settings.SCHEDULER_INTERVAL_SECONDS)
 
