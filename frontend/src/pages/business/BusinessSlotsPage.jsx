@@ -11,7 +11,7 @@ import EmptyState from '../../components/ui/EmptyState';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { SkeletonTable } from '../../components/ui/Skeleton';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../components/ui/Table';
-import { formatLocalDateTime, formatLocalTimeRange, formatCurrency } from '../../lib/formatters';
+import { formatLocalDateTime, formatLocalTimeRange, formatCurrency, getSlotStatusConfig } from '../../lib/formatters';
 import {
   Plus,
   RotateCw,
@@ -354,7 +354,9 @@ export default function BusinessSlotsPage() {
 
                     {/* Status Pill */}
                     <TableCell>
-                      <Badge status={slot.status} size="sm" />
+                      <Badge variant={getSlotStatusConfig(slot.status).variant} size="sm">
+                        {getSlotStatusConfig(slot.status).label}
+                      </Badge>
                     </TableCell>
 
                     {/* Price */}

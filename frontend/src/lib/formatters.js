@@ -102,3 +102,47 @@ export function formatRemainingSeconds(seconds) {
   const secs = total % 60;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
+
+export const SLOT_STATUS_MAP = {
+  AVAILABLE: {
+    label: 'Available',
+    variant: 'green',
+    colour: 'green',
+    badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    dot: 'bg-emerald-500',
+  },
+  BOOKED: {
+    label: 'Booked',
+    variant: 'slate',
+    colour: 'slate',
+    badge: 'bg-zinc-100 text-zinc-700 border-zinc-200',
+    dot: 'bg-zinc-400',
+  },
+  HELD: {
+    label: 'Temporarily Held',
+    variant: 'amber',
+    colour: 'amber',
+    badge: 'bg-amber-50 text-amber-700 border-amber-200',
+    dot: 'bg-amber-500',
+  },
+  CANCELLED: {
+    label: 'Cancelled',
+    variant: 'red',
+    colour: 'red',
+    badge: 'bg-rose-50 text-rose-700 border-rose-200',
+    dot: 'bg-rose-500',
+  },
+};
+
+export function getSlotStatusConfig(status) {
+  const key = String(status || '').toUpperCase();
+  return (
+    SLOT_STATUS_MAP[key] || {
+      label: status || '—',
+      variant: 'slate',
+      colour: 'slate',
+      badge: 'bg-zinc-100 text-zinc-700 border-zinc-200',
+      dot: 'bg-zinc-400',
+    }
+  );
+}

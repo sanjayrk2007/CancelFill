@@ -1,4 +1,5 @@
 import { cn } from '../../lib/utils';
+import { SLOT_STATUS_MAP } from '../../lib/formatters';
 
 export default function Badge({
   status,
@@ -10,9 +11,16 @@ export default function Badge({
   const normalizedStatus = (status || (typeof children === 'string' ? children : ''))
     .toString()
     .toUpperCase();
+  const slotConfig = SLOT_STATUS_MAP[normalizedStatus];
 
   const getStyles = () => {
-    // 2. Status colors only on badges: AVAILABLE green, BOOKED slate, HELD amber, CONFIRMED green, CANCELLED red, EXPIRED/DECLINED slate, RECOVERED blue.
+    if (slotConfig && !variant) {
+      return {
+        badge: slotConfig.badge,
+        dot: slotConfig.dot,
+      };
+    }
+
     if (variant === 'green' || normalizedStatus === 'AVAILABLE' || normalizedStatus === 'CONFIRMED' || normalizedStatus === 'PAID') {
       return {
         badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -52,7 +60,6 @@ export default function Badge({
       };
     }
 
-    // Default neutral
     return {
       badge: 'bg-zinc-100 text-zinc-700 border-zinc-200',
       dot: 'bg-zinc-400',
@@ -68,6 +75,8 @@ export default function Badge({
       ? 'px-3 py-1 text-sm'
       : 'px-2.5 py-0.5 text-xs';
 
+  const label = children || (slotConfig ? slotConfig.label : status);
+
   return (
     <span
       className={cn(
@@ -78,7 +87,7 @@ export default function Badge({
       )}
     >
       <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', dot)} />
-      <span>{children || status}</span>
+      <span>{label}</span>
     </span>
   );
 }

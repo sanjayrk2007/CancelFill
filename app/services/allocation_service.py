@@ -338,6 +338,7 @@ def accept_hold(
         hold = db.scalars(select(Hold).where(Hold.id == hold_id).with_for_update()).first()
         if not hold:
             raise NotFoundError(f"Hold with id '{hold_id}' not found.")
+        db.refresh(hold)
         slot = db.scalars(select(Slot).where(Slot.id == hold.slot_id).with_for_update()).first()
         if not slot:
             raise NotFoundError(f"Associated slot '{hold.slot_id}' not found.")

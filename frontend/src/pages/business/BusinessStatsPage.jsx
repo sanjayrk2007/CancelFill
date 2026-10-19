@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import client from '../../api/client';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import Card from '../../components/ui/Card';
@@ -17,6 +18,7 @@ import {
   CheckCircle,
   Clock,
   Calendar,
+  Users,
 } from 'lucide-react';
 
 export default function BusinessStatsPage() {
@@ -24,6 +26,7 @@ export default function BusinessStatsPage() {
 
   const [stats, setStats] = useState(null);
   const [bookings, setBookings] = useState([]);
+  const [waitlists, setWaitlists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState(null);
@@ -35,12 +38,14 @@ export default function BusinessStatsPage() {
     setError(null);
 
     try {
-      const [statsRes, bookingsRes] = await Promise.all([
+      const [statsRes, bookingsRes, waitlistRes] = await Promise.all([
         client.get('/api/v1/business/stats'),
         client.get('/api/v1/business/bookings'),
+        client.get('/api/v1/business/waitlist'),
       ]);
       setStats(statsRes.data);
       setBookings(bookingsRes.data || []);
+      setWaitlists(waitlistRes.data || []);
     } catch (err) {
       console.error('Error fetching business analytics:', err);
       setError(err.response?.data?.detail || 'Failed to load business recovery statistics.');
@@ -50,7 +55,6 @@ export default function BusinessStatsPage() {
     }
   }, []);
 
-  // Poll every 10 seconds without synchronous setState on mount
   useEffect(() => {
     fetchStatsAndBookings(false);
 
@@ -62,16 +66,30 @@ export default function BusinessStatsPage() {
   }, [fetchStatsAndBookings]);
 
   const conversionPercentage = useMemo(() => {
-    if (!stats) return '0.0';
-    return ((stats.conversion_rate || 0) * 100).toFixed(1);
+    if (!stats || !stats.offers_made) return '0.0';
+    const rate = Number(stats.conversion_rate);
+    return isNaN(rate) ? '0.0' : (rate * 100).toFixed(1);
   }, [stats]);
 
   const utilizationPercentage = useMemo(() => {
-    if (!stats) return '0.0';
-    return ((stats.utilization_rate || 0) * 100).toFixed(1);
+    if (!stats || !stats.total_slots) return '0.0';
+    const rate = Number(stats.utilization_rate);
+    return isNaN(rate) ? '0.0' : (rate * 100).toFixed(1);
   }, [stats]);
 
-  // Recent recoveries from existing bookings data
+  const waitingStats = useMemo(() => {
+    const totalWaiting = waitlists.reduce(
+      (sum, w) => sum + (w.entries?.filter((e) => e.status === 'WAITING').length || 0),
+      0
+    );
+    const slotsCount = stats?.total_slots || 0;
+    const avgWaiting = slotsCount > 0 ? (totalWaiting / slotsCount).toFixed(1) : '0';
+    return {
+      totalWaiting,
+      avgWaiting,
+    };
+  }, [waitlists, stats]);
+
   const recentRecoveries = useMemo(() => {
     return bookings.filter(
       (b) => b.source === 'RECOVERED' || Boolean(b.recovered_from_booking_id)
@@ -80,7 +98,6 @@ export default function BusinessStatsPage() {
 
   return (
     <div className="space-y-8">
-      {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900">
@@ -111,7 +128,6 @@ export default function BusinessStatsPage() {
         </div>
       </div>
 
-      {/* Inline Error State with Retry */}
       {error && (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
@@ -126,49 +142,50 @@ export default function BusinessStatsPage() {
 
       {loading ? (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <SkeletonCard count={4} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <SkeletonCard count={5} />
           </div>
           <SkeletonTable rows={4} cols={4} />
         </div>
       ) : stats ? (
         <>
-          {/* 1. 4 STAT CARDS (Stripe Dashboard KPI cards) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* KPI 1: Recovered Revenue */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <StatCard
               label="Recovered Revenue"
-              value={formatCurrency(stats.recovered_revenue)}
+              value={formatCurrency(stats.recovered_revenue || 0)}
               hint="Revenue saved by auto-filling cancellations"
               icon={TrendingUp}
             />
 
-            {/* KPI 2: Recovered Bookings */}
             <StatCard
               label="Recovered Bookings"
-              value={stats.recovered_bookings}
+              value={stats.recovered_bookings ?? 0}
               hint="Cancelled slots re-filled from waitlist"
               icon={CheckCircle}
             />
 
-            {/* KPI 3: Conversion Rate */}
             <StatCard
               label="Conversion Rate"
               value={`${conversionPercentage}%`}
-              hint={`${stats.offers_accepted} accepted of ${stats.offers_made} offers`}
+              hint={`${stats.offers_accepted ?? 0} accepted of ${stats.offers_made ?? 0} offers`}
               icon={Sparkles}
             />
 
-            {/* KPI 4: Slot Utilization */}
             <StatCard
               label="Slot Utilization"
               value={`${utilizationPercentage}%`}
-              hint={`${stats.booked_slots} booked of ${stats.total_slots} total slots`}
+              hint={`${stats.booked_slots ?? 0} booked of ${stats.total_slots ?? 0} total slots`}
               icon={Calendar}
+            />
+
+            <StatCard
+              label="Waiting per Slot"
+              value={waitingStats.avgWaiting}
+              hint={`${waitingStats.totalWaiting} waiting across ${stats.total_slots ?? 0} slots`}
+              icon={Users}
             />
           </div>
 
-          {/* 2. ROW OF OFFER COUNTS */}
           <div className="space-y-3">
             <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
               Hold Offers Overview
@@ -180,7 +197,7 @@ export default function BusinessStatsPage() {
                   Offers Made
                 </span>
                 <span className="text-xl font-bold text-zinc-900 mt-1 block">
-                  {stats.offers_made}
+                  {stats.offers_made ?? 0}
                 </span>
               </Card>
 
@@ -189,7 +206,7 @@ export default function BusinessStatsPage() {
                   Offers Accepted
                 </span>
                 <span className="text-xl font-bold text-zinc-900 mt-1 block">
-                  {stats.offers_accepted}
+                  {stats.offers_accepted ?? 0}
                 </span>
               </Card>
 
@@ -198,7 +215,7 @@ export default function BusinessStatsPage() {
                   Offers Declined
                 </span>
                 <span className="text-xl font-bold text-zinc-900 mt-1 block">
-                  {stats.offers_declined}
+                  {stats.offers_declined ?? 0}
                 </span>
               </Card>
 
@@ -207,13 +224,12 @@ export default function BusinessStatsPage() {
                   Offers Expired
                 </span>
                 <span className="text-xl font-bold text-zinc-900 mt-1 block">
-                  {stats.offers_expired}
+                  {stats.offers_expired ?? 0}
                 </span>
               </Card>
             </div>
           </div>
 
-          {/* 3. RECENT RECOVERIES LIST (From existing bookings data) */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
@@ -229,6 +245,13 @@ export default function BusinessStatsPage() {
                 icon={Clock}
                 title="No recoveries recorded yet"
                 description="When cancellations occur and are accepted by waitlist candidates, recovered appointments will be listed here."
+                action={
+                  <Link to="/business/slots">
+                    <Button variant="primary" size="sm">
+                      Manage resource slots
+                    </Button>
+                  </Link>
+                }
               />
             ) : (
               <Table>

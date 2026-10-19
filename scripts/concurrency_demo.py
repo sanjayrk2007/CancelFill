@@ -14,9 +14,16 @@ PASSWORD = "password123"
 
 
 def _register(client: httpx.Client, base_url: str, email: str, name: str, role: str) -> Dict[str, str]:
+    payload: Dict = {"email": email, "password": PASSWORD, "name": name, "role": role}
+    if role == "BUSINESS":
+        payload["business_name"] = name
+        payload["category"] = "OTHER"
+        payload["contact_phone"] = "+910000000000"
+    else:
+        payload["phone"] = "+910000000000"
     response = client.post(
         f"{base_url}/api/v1/auth/register",
-        json={"email": email, "password": PASSWORD, "name": name, "role": role},
+        json=payload,
     )
     if response.status_code not in (201, 400):
         response.raise_for_status()

@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useOffers } from '../../context/useOffers';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
 import Card from '../../components/ui/Card';
@@ -8,6 +8,7 @@ import Button from '../../components/ui/Button';
 import Countdown from '../../components/ui/Countdown';
 import EmptyState from '../../components/ui/EmptyState';
 import ConfirmDialog from '../../components/ui/ConfirmDialog';
+import BookingConfirmationDialog from '../../components/ui/BookingConfirmationDialog';
 import { SkeletonCard } from '../../components/ui/Skeleton';
 import { formatLocalDateTime, formatLocalTimeRange, formatCurrency } from '../../lib/formatters';
 import {
@@ -41,22 +42,22 @@ export default function OffersPage() {
   } = useOffers();
 
   const navigate = useNavigate();
-  const [activeAction, setActiveAction] = useState({}); // { [offerId]: 'accept' | 'decline' }
+  const [activeAction, setActiveAction] = useState({});
   const [acceptedOfferId, setAcceptedOfferId] = useState(null);
+  const [confirmedBooking, setConfirmedBooking] = useState(null);
   const [declineTarget, setDeclineTarget] = useState(null);
 
   const handleAccept = useCallback(async (offer) => {
     if (inFlightIds.has(offer.id)) return;
     setActiveAction((prev) => ({ ...prev, [offer.id]: 'accept' }));
     try {
-      await acceptOffer(offer.id);
+      const booking = await acceptOffer(offer.id);
       setAcceptedOfferId(offer.id);
-      // Show short success state, then go to /bookings
-      setTimeout(() => {
-        navigate('/bookings');
-      }, 1200);
+      setConfirmedBooking({
+        ...(booking || {}),
+        slot: offer.slot,
+      });
     } catch {
-      // Handled in context toast
     } finally {
       setActiveAction((prev) => {
         const next = { ...prev };
@@ -64,7 +65,7 @@ export default function OffersPage() {
         return next;
       });
     }
-  }, [inFlightIds, acceptOffer, navigate]);
+  }, [inFlightIds, acceptOffer]);
 
   const handleDecline = useCallback(async (offer) => {
     if (inFlightIds.has(offer.id)) return;
@@ -138,9 +139,16 @@ export default function OffersPage() {
           title="No active hold offers"
           description="When a cancellation occurs for an appointment slot you have waitlisted, an exclusive hold offer will appear here with an active timer."
           action={
-            <Button variant="secondary" size="sm" onClick={refreshOffers} icon={RotateCw}>
-              Check again
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={refreshOffers} icon={RotateCw}>
+                Check again
+              </Button>
+              <Link to="/slots">
+                <Button variant="primary" size="sm">
+                  Browse slots
+                </Button>
+              </Link>
+            </div>
           }
         />
       ) : (
@@ -281,6 +289,15 @@ export default function OffersPage() {
           if (target) handleDecline(target);
         }}
         onClose={() => setDeclineTarget(null)}
+      />
+
+      <BookingConfirmationDialog
+        isOpen={Boolean(confirmedBooking)}
+        booking={confirmedBooking}
+        onClose={() => {
+          setConfirmedBooking(null);
+          navigate('/bookings');
+        }}
       />
     </div>
   );

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import client from '../../api/client';
 import { useToast } from '../../context/useToast';
 import { useDocumentTitle } from '../../hooks/useDocumentTitle';
@@ -227,7 +228,13 @@ export default function BusinessBookingsPage() {
               >
                 Clear filters
               </Button>
-            ) : null
+            ) : (
+              <Link to="/business/slots">
+                <Button variant="primary" size="sm">
+                  Manage slots
+                </Button>
+              </Link>
+            )
           }
         />
       ) : (

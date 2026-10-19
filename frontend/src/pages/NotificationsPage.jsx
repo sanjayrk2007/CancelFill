@@ -4,21 +4,27 @@ import client from '../api/client';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import { useNotifications } from '../context/useNotifications';
 import Button from '../components/ui/Button';
+import Skeleton from '../components/ui/Skeleton';
 import EmptyState from '../components/ui/EmptyState';
 import { formatLocalDateTime } from '../lib/formatters';
-import { Bell, CheckCheck } from 'lucide-react';
+import { Bell, CheckCheck, AlertCircle } from 'lucide-react';
 
 export default function NotificationsPage() {
   useDocumentTitle('Notifications');
   const [data, setData] = useState({ unread_count: 0, items: [] });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const { refresh: refreshUnread } = useNotifications();
 
   const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
       const res = await client.get('/api/v1/notifications');
       setData(res.data);
+    } catch {
+      setError('Failed to load notifications. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -58,8 +64,46 @@ export default function NotificationsPage() {
         )}
       </div>
 
-      {!loading && data.items.length === 0 ? (
-        <EmptyState icon={Bell} title="Nothing yet" description="Offers, booking changes and refunds will show up here." />
+      {error && (
+        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+            <span className="text-xs font-medium">{error}</span>
+          </div>
+          <Button variant="secondary" size="sm" onClick={load}>
+            Retry
+          </Button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="space-y-2.5">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="rounded-xl border border-zinc-200 bg-white p-4 space-y-2">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-3 w-full" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          ))}
+        </div>
+      ) : data.items.length === 0 ? (
+        <EmptyState
+          icon={Bell}
+          title="Nothing yet"
+          description="Offers, booking changes and refunds will show up here."
+          action={
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={load}>
+                Refresh
+              </Button>
+              <Link to="/slots">
+                <Button variant="primary" size="sm">
+                  Browse slots
+                </Button>
+              </Link>
+            </div>
+          }
+        />
       ) : (
         <ul className="space-y-2">
           {data.items.map((n) => (

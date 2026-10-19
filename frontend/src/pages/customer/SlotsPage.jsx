@@ -8,8 +8,9 @@ import Card from '../../components/ui/Card';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import EmptyState from '../../components/ui/EmptyState';
+import BookingConfirmationDialog from '../../components/ui/BookingConfirmationDialog';
 import { SkeletonCard } from '../../components/ui/Skeleton';
-import { formatLocalTimeRange, formatCurrency } from '../../lib/formatters';
+import { formatLocalTimeRange, formatCurrency, getSlotStatusConfig } from '../../lib/formatters';
 import {
   CalendarDays,
   Clock,
@@ -47,6 +48,7 @@ export default function SlotsPage() {
   const [dateTo, setDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState('AVAILABLE');
   const [actionLoadingId, setActionLoadingId] = useState(null);
+  const [bookingConfirmation, setBookingConfirmation] = useState(null);
 
   const { success, error: toastError } = useToast();
   const { user } = useAuth();
@@ -110,13 +112,19 @@ export default function SlotsPage() {
   const handleBookNow = async (slot) => {
     setActionLoadingId(slot.id);
     try {
+      let bookingData = null;
       try {
-        await client.post('/api/v1/bookings', { slot_id: slot.id });
+        const response = await client.post('/api/v1/bookings', { slot_id: slot.id });
+        bookingData = response.data;
       } catch (err) {
         if (err.response?.status !== 402) throw err;
-        await checkoutAndPay({ slotId: slot.id, user });
+        bookingData = await checkoutAndPay({ slotId: slot.id, user });
       }
       success(`Booked slot for ${slot.resource_id}.`);
+      setBookingConfirmation({
+        ...(bookingData || {}),
+        slot,
+      });
       await fetchSlots(true);
     } catch (err) {
       if (err.cancelled) {
@@ -397,7 +405,9 @@ export default function SlotsPage() {
                               </span>
                             </div>
                           </div>
-                          <Badge status={slot.status} size="sm" />
+                          <Badge variant={getSlotStatusConfig(slot.status).variant} size="sm">
+                            {getSlotStatusConfig(slot.status).label}
+                          </Badge>
                         </div>
 
                         <div className="space-y-2 text-xs">
@@ -468,6 +478,12 @@ export default function SlotsPage() {
           ))}
         </div>
       )}
+
+      <BookingConfirmationDialog
+        isOpen={Boolean(bookingConfirmation)}
+        booking={bookingConfirmation}
+        onClose={() => setBookingConfirmation(null)}
+      />
     </div>
   );
 }

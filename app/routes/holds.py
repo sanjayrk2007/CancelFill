@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import require_customer, get_current_user
@@ -31,7 +32,7 @@ def accept_hold_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
-    except (OfferExpired, InvalidTransition, ValueError):
+    except (OfferExpired, InvalidTransition, ValueError, IntegrityError):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This offer is no longer available")
 
 @router.post("/{hold_id}/decline", response_model=HoldResponse, status_code=status.HTTP_200_OK, summary="Decline an active hold")
