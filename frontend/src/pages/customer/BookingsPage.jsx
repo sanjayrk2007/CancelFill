@@ -30,6 +30,7 @@ export default function BookingsPage() {
   // Cancellation dialog state
   const [cancelBookingTarget, setCancelBookingTarget] = useState(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   const { success, error: toastError } = useToast();
 
@@ -41,6 +42,7 @@ export default function BookingsPage() {
     try {
       const response = await client.get('/api/v1/me/bookings');
       setBookings(response.data || []);
+      setNow(Date.now());
     } catch (err) {
       console.error('Error fetching bookings:', err);
       setError(err.response?.data?.detail || 'Failed to load bookings.');
@@ -57,11 +59,8 @@ export default function BookingsPage() {
     if (!cancelBookingTarget) return;
     setIsCancelling(true);
     try {
-      const response = await client.post(`/api/v1/bookings/${cancelBookingTarget.id}/cancel`);
-      const msg = response.data?.candidate_selected
-        ? 'Booking cancelled. Waitlist candidate has been automatically selected with a temporary hold.'
-        : 'Booking cancelled successfully.';
-      success(msg);
+      await client.post(`/api/v1/bookings/${cancelBookingTarget.id}/cancel`);
+      success('Your appointment has been cancelled.');
       setCancelBookingTarget(null);
       await fetchData(true);
     } catch (err) {
@@ -71,8 +70,6 @@ export default function BookingsPage() {
       setIsCancelling(false);
     }
   };
-
-  const now = Date.now();
 
   const upcomingBookings = useMemo(() => {
     return bookings.filter((b) => {
@@ -94,7 +91,7 @@ export default function BookingsPage() {
     return bookings.filter((b) => b.status === 'CANCELLED');
   }, [bookings]);
 
-  const renderBookingGrid = (list, emptyMessage) => {
+  const renderBookingGrid = (list, emptyMessage, { canCancel = false } = {}) => {
     if (list.length === 0) {
       return (
         <EmptyState
@@ -116,6 +113,8 @@ export default function BookingsPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {list.map((booking) => {
           const isConfirmed = booking.status === 'CONFIRMED';
+          const isCancelled = booking.status === 'CANCELLED';
+          const cancelledByBusiness = isCancelled && booking.cancelled_by_role === 'BUSINESS';
           const isRecovered = Boolean(
             booking.recovered_from_booking_id || booking.source === 'RECOVERED'
           );
@@ -148,8 +147,19 @@ export default function BookingsPage() {
                 </div>
 
                 <div className="space-y-2.5 text-xs">
-                  {booking.status === 'CANCELLED' && booking.cancellation_reason && (
-                    <p className="text-zinc-500">Reason: {booking.cancellation_reason}</p>
+                  {cancelledByBusiness && (
+                    <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-rose-800">
+                      <p className="font-semibold">The business cancelled this appointment</p>
+                      {booking.cancellation_reason && (
+                        <p className="mt-0.5 text-rose-700">Reason: {booking.cancellation_reason}</p>
+                      )}
+                    </div>
+                  )}
+                  {isCancelled && !cancelledByBusiness && (
+                    <p className="text-zinc-500">
+                      You cancelled this booking.
+                      {booking.cancellation_reason ? ` Reason: ${booking.cancellation_reason}` : ''}
+                    </p>
                   )}
                   {/* Recovered from waitlist chip on RECOVERED bookings */}
                   {isRecovered && (
@@ -186,7 +196,7 @@ export default function BookingsPage() {
               </div>
 
               {/* Card Footer: Cancel Button */}
-              {isConfirmed && (
+              {isConfirmed && canCancel && (
                 <div className="mt-4 pt-3 border-t border-zinc-100 flex justify-end">
                   <Button
                     variant="secondary"
@@ -272,7 +282,8 @@ export default function BookingsPage() {
           <TabsContent value="upcoming">
             {renderBookingGrid(
               upcomingBookings,
-              'You have no upcoming appointments. Browse our open slots to reserve a time.'
+              'You have no upcoming appointments. Browse our open slots to reserve a time.',
+              { canCancel: true }
             )}
           </TabsContent>
 
@@ -295,22 +306,40 @@ export default function BookingsPage() {
       {/* CONFIRMATION DIALOG: CANCEL BOOKING */}
       <ConfirmDialog
         isOpen={Boolean(cancelBookingTarget)}
-        title="Cancel Appointment Booking?"
+        title="Cancel this appointment?"
         description={
           cancelBookingTarget ? (
-            <span>
-              Are you sure you want to cancel your confirmed booking for{' '}
-              <strong className="text-zinc-900 font-semibold">
-                {cancelBookingTarget.slot?.resource_id || 'this slot'}
-              </strong>
-              ? It will be immediately offered to candidates waiting in the priority queue.
-            </span>
+            <div className="space-y-3">
+              <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5 space-y-0.5">
+                <div className="font-semibold text-zinc-900">
+                  {cancelBookingTarget.slot?.resource_id || 'Reserved appointment'}
+                </div>
+                <div className="text-zinc-600">
+                  {formatLocalDateTime(cancelBookingTarget.slot?.start_time)}
+                </div>
+                <div className="text-zinc-500">
+                  {formatLocalTimeRange(
+                    cancelBookingTarget.slot?.start_time,
+                    cancelBookingTarget.slot?.end_time
+                  )}
+                </div>
+              </div>
+              <p>
+                This frees the slot straight away and offers it to the next person on the waitlist.
+                You can&apos;t undo this.
+              </p>
+              {cancelBookingTarget.payment_status === 'PAID' && (
+                <p className="text-zinc-500">
+                  Your payment will be refunded to your original payment method.
+                </p>
+              )}
+            </div>
           ) : (
             'Are you sure you want to cancel this booking?'
           )
         }
-        confirmText="Cancel Booking"
-        cancelText="Keep Booking"
+        confirmText="Yes, cancel appointment"
+        cancelText="Keep appointment"
         confirmVariant="danger"
         isLoading={isCancelling}
         onConfirm={handleConfirmCancel}

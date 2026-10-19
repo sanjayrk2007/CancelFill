@@ -7,6 +7,7 @@ import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import Countdown from '../../components/ui/Countdown';
 import EmptyState from '../../components/ui/EmptyState';
+import ConfirmDialog from '../../components/ui/ConfirmDialog';
 import { SkeletonCard } from '../../components/ui/Skeleton';
 import { formatLocalDateTime, formatLocalTimeRange, formatCurrency } from '../../lib/formatters';
 import {
@@ -18,6 +19,13 @@ import {
   X,
   Check,
 } from 'lucide-react';
+
+const DEFAULT_HOLD_SECONDS = 900;
+
+function holdDurationSeconds(offer) {
+  const total = Math.round((new Date(offer.expires_at) - new Date(offer.created_at)) / 1000);
+  return Number.isFinite(total) && total > 0 ? total : DEFAULT_HOLD_SECONDS;
+}
 
 export default function OffersPage() {
   useDocumentTitle('Hold Offers');
@@ -35,6 +43,7 @@ export default function OffersPage() {
   const navigate = useNavigate();
   const [activeAction, setActiveAction] = useState({}); // { [offerId]: 'accept' | 'decline' }
   const [acceptedOfferId, setAcceptedOfferId] = useState(null);
+  const [declineTarget, setDeclineTarget] = useState(null);
 
   const handleAccept = useCallback(async (offer) => {
     if (inFlightIds.has(offer.id)) return;
@@ -188,7 +197,7 @@ export default function OffersPage() {
                     </span>
                     <Countdown
                       expiresAt={offer.expires_at}
-                      totalDurationSeconds={300}
+                      totalDurationSeconds={holdDurationSeconds(offer)}
                       size="lg"
                     />
                   </div>
@@ -225,7 +234,7 @@ export default function OffersPage() {
                     icon={X}
                     disabled={isInFlight}
                     isLoading={isInFlight && currentAction === 'decline'}
-                    onClick={() => handleDecline(offer)}
+                    onClick={() => setDeclineTarget(offer)}
                   >
                     Decline
                   </Button>
@@ -246,6 +255,33 @@ export default function OffersPage() {
           })}
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={Boolean(declineTarget)}
+        title="Decline this offer?"
+        description={
+          declineTarget ? (
+            <p>
+              You&apos;ll give up the held slot for{' '}
+              <strong className="text-zinc-900 font-semibold">
+                {declineTarget.slot?.resource_id || 'this appointment'}
+              </strong>{' '}
+              and it moves to the next person on the waitlist. You can&apos;t undo this.
+            </p>
+          ) : (
+            'Are you sure you want to decline this offer?'
+          )
+        }
+        confirmText="Yes, decline offer"
+        cancelText="Keep offer"
+        confirmVariant="danger"
+        onConfirm={() => {
+          const target = declineTarget;
+          setDeclineTarget(null);
+          if (target) handleDecline(target);
+        }}
+        onClose={() => setDeclineTarget(null)}
+      />
     </div>
   );
 }

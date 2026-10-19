@@ -709,13 +709,14 @@ export default function BusinessSlotsPage() {
         title="Cancel Client Booking?"
         description={
           cancelTarget ? (
-            <span className="block space-y-3">
-              <span className="block">
+            <div className="space-y-3">
+              <p>
                 Cancel the booking for{' '}
                 <strong className="text-zinc-900 font-semibold">{cancelTarget.name}</strong> on{' '}
-                <strong className="text-zinc-900 font-semibold">{cancelTarget.resource}</strong>? Any payment is
-                refunded in full and the next waitlisted customer is offered the seat.
-              </span>
+                <strong className="text-zinc-900 font-semibold">{cancelTarget.resource}</strong>? The customer is
+                notified straight away with your reason, any payment is refunded in full, and the next waitlisted
+                customer is offered the seat.
+              </p>
               <textarea
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
@@ -724,14 +725,15 @@ export default function BusinessSlotsPage() {
                 placeholder="Reason (shown to the customer) *"
                 className="block w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
-            </span>
+            </div>
           ) : (
             'Are you sure you want to cancel this booking?'
           )
         }
-        confirmText="Cancel Booking"
-        cancelText="Keep Booking"
+        confirmText="Cancel booking"
+        cancelText="Keep booking"
         confirmVariant="danger"
+        confirmDisabled={!cancelReason.trim()}
         isLoading={isCancelling}
         onConfirm={handleConfirmCancelBooking}
         onClose={() => {

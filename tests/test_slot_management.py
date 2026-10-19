@@ -184,5 +184,14 @@ def test_customer_is_notified_of_their_own_cancellation_and_of_business_cancella
     b2 = _book(client, customer_2_auth_headers, s2.id).json()
     client.post(f"/api/v1/bookings/{b1['id']}/cancel", headers=customer_auth_headers)
     client.post(f"/api/v1/bookings/{b2['id']}/cancel", json={"reason": "Closed"}, headers=business_auth_headers)
-    for u in (customer_user, customer_user_2):
-        assert db.query(Notification).filter(Notification.user_id == u.id, Notification.type == "BOOKING_CANCELLED").count() == 1
+    own = db.query(Notification).filter(Notification.user_id == customer_user.id, Notification.type == "BOOKING_CANCELLED").all()
+    assert len(own) == 1 and "cancelled by you" in own[0].body
+    by_business = db.query(Notification).filter(
+        Notification.user_id == customer_user_2.id, Notification.type == "BOOKING_CANCELLED_BY_BUSINESS"
+    ).all()
+    assert len(by_business) == 1
+    assert by_business[0].title == "Your appointment was cancelled by the business"
+    assert "Reason: Closed" in by_business[0].body and by_business[0].show_in_app
+    assert db.query(Notification).filter(
+        Notification.user_id == customer_user_2.id, Notification.type == "BOOKING_CANCELLED"
+    ).count() == 0

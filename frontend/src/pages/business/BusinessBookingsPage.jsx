@@ -323,28 +323,32 @@ export default function BusinessBookingsPage() {
         title="Cancel Client Booking?"
         description={
           cancelTarget ? (
-            <span>
-              Are you sure you want to cancel the booking for{' '}
-              <strong className="text-zinc-900 font-semibold">
-                {cancelTarget.holder_name || 'this client'}
-              </strong>
-              ? A hold offer will be automatically extended to the next waitlisted customer.
+            <div className="space-y-3">
+              <p>
+                Cancel the booking for{' '}
+                <strong className="text-zinc-900 font-semibold">
+                  {cancelTarget.holder_name || 'this client'}
+                </strong>
+                ? The customer is notified straight away with your reason, any payment is refunded, and
+                the next waitlisted customer is offered the slot.
+              </p>
               <textarea
                 value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 maxLength={500}
                 rows={3}
-                placeholder="Reason for cancellation (required)"
-                className="mt-3 block w-full rounded-md border border-zinc-300 p-2 text-sm text-zinc-900"
+                placeholder="Reason (shown to the customer) *"
+                className="block w-full bg-white border border-zinc-200 rounded-lg px-3 py-2 text-xs text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
-            </span>
+            </div>
           ) : (
             'Are you sure you want to cancel this booking?'
           )
         }
-        confirmText="Cancel Booking"
-        cancelText="Keep Booking"
+        confirmText="Cancel booking"
+        cancelText="Keep booking"
         confirmVariant="danger"
+        confirmDisabled={!cancelReason.trim()}
         isLoading={isCancelling}
         onConfirm={handleConfirmCancel}
         onClose={() => {

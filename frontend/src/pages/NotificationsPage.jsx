@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import client from '../api/client';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
+import { useNotifications } from '../context/useNotifications';
 import Button from '../components/ui/Button';
 import EmptyState from '../components/ui/EmptyState';
 import { formatLocalDateTime } from '../lib/formatters';
@@ -12,6 +13,8 @@ export default function NotificationsPage() {
   const [data, setData] = useState({ unread_count: 0, items: [] });
   const [loading, setLoading] = useState(true);
 
+  const { refresh: refreshUnread } = useNotifications();
+
   const load = useCallback(async () => {
     try {
       const res = await client.get('/api/v1/notifications');
@@ -19,7 +22,8 @@ export default function NotificationsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+    refreshUnread();
+  }, [refreshUnread]);
 
   useEffect(() => {
     load();

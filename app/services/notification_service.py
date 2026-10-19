@@ -29,6 +29,7 @@ from app.services import notification_providers as providers
 logger = logging.getLogger(__name__)
 
 ALL_CHANNELS = {NotificationChannel.EMAIL.value, NotificationChannel.SMS.value, NotificationChannel.PUSH.value}
+BUSINESS_CANCELLATION_TYPE = "BOOKING_CANCELLED_BY_BUSINESS"
 
 
 def _fmt(dt: datetime) -> str:
@@ -106,11 +107,17 @@ def notify_booking_confirmed(db: Session, booking: Booking, slot: Slot, now: Opt
 def notify_booking_cancelled(
     db: Session, booking: Booking, slot: Slot, reason: Optional[str], by_business: bool, now: Optional[datetime] = None
 ) -> None:
-    who = "the business" if by_business else "you"
-    extra = f" Reason: {reason}" if reason and by_business else ""
+    if by_business:
+        why = f" Reason: {reason}" if reason else ""
+        enqueue(
+            db, booking.user_id, BUSINESS_CANCELLATION_TYPE, "Your appointment was cancelled by the business",
+            f"The business cancelled your booking for {slot.resource_id} on {_fmt(slot.start_time)}.{why}",
+            link="/bookings", now=now,
+        )
+        return
     enqueue(
         db, booking.user_id, "BOOKING_CANCELLED", "Booking cancelled",
-        f"Your booking for {slot.resource_id} on {_fmt(slot.start_time)} was cancelled by {who}.{extra}",
+        f"Your booking for {slot.resource_id} on {_fmt(slot.start_time)} was cancelled by you.",
         link="/bookings", now=now,
     )
 

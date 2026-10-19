@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
-import client from '../api/client';
+import { useState } from 'react';
 import { NavLink, useNavigate, Outlet } from 'react-router-dom';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import * as Dialog from '@radix-ui/react-dialog';
 import { useAuth } from '../context/useAuth';
 import { useToast } from '../context/useToast';
 import { useOffers } from '../context/useOffers';
+import { useNotifications } from '../context/useNotifications';
+import BusinessCancellationDialog from './BusinessCancellationDialog';
 import Avatar from './ui/Avatar';
 import Badge from './ui/Badge';
 import Button from './ui/Button';
@@ -34,23 +35,7 @@ export default function Layout() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [profileDialogOpen, setProfileDialogOpen] = useState(false);
 
-  const [unreadCount, setUnreadCount] = useState(0);
-
-  useEffect(() => {
-    if (!user) return undefined;
-    let active = true;
-    const load = () =>
-      client
-        .get('/api/v1/notifications', { params: { unread_only: true, limit: 1 } })
-        .then((res) => active && setUnreadCount(res.data.unread_count))
-        .catch(() => {});
-    load();
-    const id = setInterval(load, 20000);
-    return () => {
-      active = false;
-      clearInterval(id);
-    };
-  }, [user]);
+  const { unreadCount } = useNotifications();
 
   const handleLogout = () => {
     logout();
@@ -342,6 +327,8 @@ export default function Layout() {
           <span className="text-zinc-400">All local times in your timezone</span>
         </div>
       </footer>
+
+      {user && role === 'CUSTOMER' && <BusinessCancellationDialog />}
 
       {/* Profile Dialog */}
       <Dialog.Root open={profileDialogOpen} onOpenChange={setProfileDialogOpen}>
