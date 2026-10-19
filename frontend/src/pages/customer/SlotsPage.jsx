@@ -15,23 +15,50 @@ import {
   Clock,
   RotateCw,
   AlertCircle,
-  Search,
   Check,
   UserPlus,
+  Building2,
+  Tag,
+  Calendar,
+  X,
 } from 'lucide-react';
+
+const CATEGORIES = [
+  { value: 'ALL', label: 'All Categories' },
+  { value: 'SALON', label: 'Salon' },
+  { value: 'TUTOR', label: 'Tutor' },
+  { value: 'SPORTS', label: 'Sports' },
+  { value: 'CLINIC', label: 'Clinic' },
+  { value: 'SERVICE_CENTER', label: 'Service Center' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 export default function SlotsPage() {
   useDocumentTitle('Appointment Slots');
 
   const [slots, setSlots] = useState([]);
+  const [businesses, setBusinesses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [filter, setFilter] = useState('ALL'); // 'ALL' | 'AVAILABLE' | 'WAITLIST'
-  const [searchQuery, setSearchQuery] = useState('');
+
+  const [businessId, setBusinessId] = useState('');
+  const [category, setCategory] = useState('ALL');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState('AVAILABLE');
   const [actionLoadingId, setActionLoadingId] = useState(null);
 
   const { success, error: toastError } = useToast();
   const { user } = useAuth();
+
+  const fetchBusinesses = useCallback(async () => {
+    try {
+      const response = await client.get('/api/v1/businesses');
+      setBusinesses(response.data || []);
+    } catch (err) {
+      console.error('Failed to load businesses:', err);
+    }
+  }, []);
 
   const fetchSlots = useCallback(async (isRefresh = false) => {
     if (isRefresh) {
@@ -39,7 +66,14 @@ export default function SlotsPage() {
     }
     setError(null);
     try {
-      const response = await client.get('/api/v1/slots');
+      const params = {};
+      if (businessId) params.business_id = businessId;
+      if (category && category !== 'ALL') params.category = category;
+      if (dateFrom) params.date_from = dateFrom;
+      if (dateTo) params.date_to = dateTo;
+      if (statusFilter) params.status = statusFilter;
+
+      const response = await client.get('/api/v1/slots', { params });
       setSlots(response.data || []);
     } catch (err) {
       console.error('Error fetching slots:', err);
@@ -47,11 +81,31 @@ export default function SlotsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [businessId, category, dateFrom, dateTo, statusFilter]);
+
+  useEffect(() => {
+    fetchBusinesses();
+  }, [fetchBusinesses]);
 
   useEffect(() => {
     fetchSlots(false);
   }, [fetchSlots]);
+
+  const handleClearFilters = () => {
+    setBusinessId('');
+    setCategory('ALL');
+    setDateFrom('');
+    setDateTo('');
+    setStatusFilter('AVAILABLE');
+  };
+
+  const hasActiveFilters = Boolean(
+    businessId ||
+    (category && category !== 'ALL') ||
+    dateFrom ||
+    dateTo ||
+    statusFilter !== 'AVAILABLE'
+  );
 
   const handleBookNow = async (slot) => {
     setActionLoadingId(slot.id);
@@ -60,7 +114,6 @@ export default function SlotsPage() {
         await client.post('/api/v1/bookings', { slot_id: slot.id });
       } catch (err) {
         if (err.response?.status !== 402) throw err;
-        // Paid slot: reserve the seat, collect payment, then the booking is confirmed.
         await checkoutAndPay({ slotId: slot.id, user });
       }
       success(`Booked slot for ${slot.resource_id}.`);
@@ -92,30 +145,9 @@ export default function SlotsPage() {
     }
   };
 
-  // Filter slots by status filter and search query
-  const filteredSlots = useMemo(() => {
-    return slots.filter((slot) => {
-      if (slot.status === 'CANCELLED') return false;
-      // Filter chip condition
-      if (filter === 'AVAILABLE' && slot.status !== 'AVAILABLE') return false;
-      if (filter === 'WAITLIST' && slot.status !== 'BOOKED' && slot.status !== 'HELD') return false;
-
-      // Search query condition
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        const matchesResource = slot.resource_id?.toLowerCase().includes(query);
-        const matchesId = slot.id?.toLowerCase().includes(query);
-        if (!matchesResource && !matchesId) return false;
-      }
-
-      return true;
-    });
-  }, [slots, filter, searchQuery]);
-
-  // Group filtered slots by local day (e.g. "Thu 10 Oct 2026")
   const groupedSlots = useMemo(() => {
     const groups = {};
-    [...filteredSlots]
+    [...slots]
       .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
       .forEach((slot) => {
         const dateObj = new Date(slot.start_time);
@@ -134,14 +166,10 @@ export default function SlotsPage() {
         groups[dayKey].push(slot);
       });
     return groups;
-  }, [filteredSlots]);
-
-  const availableCount = useMemo(() => slots.filter((s) => s.status === 'AVAILABLE').length, [slots]);
-  const waitlistCount = useMemo(() => slots.filter((s) => s.status === 'BOOKED' || s.status === 'HELD').length, [slots]);
+  }, [slots]);
 
   return (
     <div className="space-y-6">
-      {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-zinc-900">
@@ -153,6 +181,16 @@ export default function SlotsPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {hasActiveFilters && (
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={handleClearFilters}
+              icon={X}
+            >
+              Reset filters
+            </Button>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -166,7 +204,6 @@ export default function SlotsPage() {
         </div>
       </div>
 
-      {/* Inline Error State with Retry */}
       {error && (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
@@ -179,57 +216,115 @@ export default function SlotsPage() {
         </div>
       )}
 
-      {/* Filter Chips & Search Box */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        {/* Filter Chips */}
-        <div className="flex items-center gap-1.5 p-1 bg-zinc-100 rounded-lg border border-zinc-200/60 w-fit">
-          <button
-            type="button"
-            onClick={() => setFilter('ALL')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${filter === 'ALL'
-              ? 'bg-white text-zinc-900 font-semibold shadow-xs'
-              : 'text-zinc-600 hover:text-zinc-900'
-              }`}
-          >
-            All ({slots.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilter('AVAILABLE')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${filter === 'AVAILABLE'
-              ? 'bg-white text-zinc-900 font-semibold shadow-xs'
-              : 'text-zinc-600 hover:text-zinc-900'
-              }`}
-          >
-            Available ({availableCount})
-          </button>
-          <button
-            type="button"
-            onClick={() => setFilter('WAITLIST')}
-            className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${filter === 'WAITLIST'
-              ? 'bg-white text-zinc-900 font-semibold shadow-xs'
-              : 'text-zinc-600 hover:text-zinc-900'
-              }`}
-          >
-            Waitlist ({waitlistCount})
-          </button>
+      <div className="bg-white border border-zinc-200 rounded-xl p-4 shadow-xs space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-zinc-600 flex items-center gap-1.5">
+              <Building2 className="w-3.5 h-3.5 text-zinc-400" />
+              Business
+            </label>
+            <select
+              value={businessId}
+              onChange={(e) => setBusinessId(e.target.value)}
+              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-1.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white transition-all cursor-pointer"
+            >
+              <option value="">All Businesses</option>
+              {businesses.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.business_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-zinc-600 flex items-center gap-1.5">
+              <Tag className="w-3.5 h-3.5 text-zinc-400" />
+              Category
+            </label>
+            <select
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-1.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white transition-all cursor-pointer"
+            >
+              {CATEGORIES.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-zinc-600 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+              From Date
+            </label>
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-1.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white transition-all"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[11px] font-medium text-zinc-600 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-zinc-400" />
+              To Date
+            </label>
+            <input
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="w-full bg-zinc-50 border border-zinc-200 rounded-lg px-3 py-1.5 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white transition-all"
+            />
+          </div>
         </div>
 
-        {/* Search Box */}
-        <div className="relative sm:w-64">
-          <Search className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by resource..."
-            className="w-full bg-white border border-zinc-200 rounded-lg pl-9 pr-3 py-1.5 text-xs text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
-            aria-label="Search appointment slots"
-          />
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-zinc-100">
+          <div className="flex items-center gap-1.5 p-1 bg-zinc-100 rounded-lg border border-zinc-200/60">
+            <button
+              type="button"
+              onClick={() => setStatusFilter('AVAILABLE')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                statusFilter === 'AVAILABLE'
+                  ? 'bg-white text-zinc-900 font-semibold shadow-xs'
+                  : 'text-zinc-600 hover:text-zinc-900'
+              }`}
+            >
+              Available
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('WAITLIST')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                statusFilter === 'WAITLIST'
+                  ? 'bg-white text-zinc-900 font-semibold shadow-xs'
+                  : 'text-zinc-600 hover:text-zinc-900'
+              }`}
+            >
+              Waitlist
+            </button>
+            <button
+              type="button"
+              onClick={() => setStatusFilter('ALL')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                statusFilter === 'ALL'
+                  ? 'bg-white text-zinc-900 font-semibold shadow-xs'
+                  : 'text-zinc-600 hover:text-zinc-900'
+              }`}
+            >
+              All Slots
+            </button>
+          </div>
+
+          <span className="text-xs text-zinc-400">
+            {slots.length} {slots.length === 1 ? 'slot found' : 'slots found'}
+          </span>
         </div>
       </div>
 
-      {/* Main Content Area */}
       {loading ? (
         <SkeletonCard count={6} />
       ) : Object.keys(groupedSlots).length === 0 ? (
@@ -237,22 +332,13 @@ export default function SlotsPage() {
           icon={CalendarDays}
           title="No slots found"
           description={
-            searchQuery
-              ? `No appointment slots matching "${searchQuery}".`
-              : filter !== 'ALL'
-                ? `No slots matching filter "${filter.toLowerCase()}".`
-                : 'There are currently no slots published in the system.'
+            hasActiveFilters
+              ? 'No appointment slots match the selected criteria.'
+              : 'There are currently no slots published in the system.'
           }
           action={
-            searchQuery || filter !== 'ALL' ? (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  setFilter('ALL');
-                  setSearchQuery('');
-                }}
-              >
+            hasActiveFilters ? (
+              <Button variant="secondary" size="sm" onClick={handleClearFilters}>
                 Clear filters
               </Button>
             ) : (
@@ -263,11 +349,9 @@ export default function SlotsPage() {
           }
         />
       ) : (
-        /* Slots Grouped by Day */
         <div className="space-y-8">
           {Object.entries(groupedSlots).map(([dayLabel, daySlots]) => (
             <section key={dayLabel} className="space-y-3">
-              {/* Day Header */}
               <div className="flex items-center justify-between pb-2 border-b border-zinc-100">
                 <div className="flex items-center gap-2">
                   <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
@@ -279,7 +363,6 @@ export default function SlotsPage() {
                 </div>
               </div>
 
-              {/* Cards Grid: Cal.com / Calendly clean booking card feel */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {daySlots.map((slot) => {
                   const isAvailable = slot.status === 'AVAILABLE';
@@ -293,20 +376,30 @@ export default function SlotsPage() {
                       className="flex flex-col justify-between"
                     >
                       <div>
-                        {/* Resource & Badge */}
                         <div className="flex items-start justify-between gap-2 pb-3 mb-3 border-b border-zinc-100">
                           <div>
+                            {slot.business_name && (
+                              <div className="text-xs font-semibold text-blue-600 mb-0.5 tracking-tight">
+                                {slot.business_name}
+                              </div>
+                            )}
                             <h3 className="text-sm font-semibold text-zinc-900 tracking-tight">
                               {slot.resource_id}
                             </h3>
-                            <span className="text-[11px] font-mono text-zinc-400">
-                              {slot.id}
-                            </span>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {slot.category && (
+                                <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
+                                  {slot.category.replace('_', ' ')}
+                                </span>
+                              )}
+                              <span className="text-[11px] font-mono text-zinc-400">
+                                {slot.id}
+                              </span>
+                            </div>
                           </div>
                           <Badge status={slot.status} size="sm" />
                         </div>
 
-                        {/* Time & Price */}
                         <div className="space-y-2 text-xs">
                           <div className="flex items-center gap-2 text-zinc-700 font-medium">
                             <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
@@ -331,7 +424,6 @@ export default function SlotsPage() {
                         </div>
                       </div>
 
-                      {/* Primary Action Button */}
                       <div className="mt-4 pt-3 border-t border-zinc-100">
                         {isAvailable ? (
                           <Button

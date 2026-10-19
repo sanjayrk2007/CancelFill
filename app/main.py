@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.config import settings, DEFAULT_JWT_SECRET
 from app.database import Base, engine, get_db
-from app.routes import slots, waitlist, bookings, cancellations, holds, auth, me, business, notifications, payments
+from app.routes import slots, waitlist, bookings, cancellations, holds, auth, me, business, businesses, notifications, payments
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -69,6 +69,8 @@ app.include_router(cancellations.router, prefix=settings.API_V1_STR)
 app.include_router(holds.router, prefix=settings.API_V1_STR)
 app.include_router(me.router, prefix=settings.API_V1_STR)
 app.include_router(business.router, prefix=settings.API_V1_STR)
+app.include_router(businesses.router, prefix=settings.API_V1_STR)
+app.include_router(businesses.router)
 app.include_router(notifications.router, prefix=settings.API_V1_STR)
 app.include_router(payments.router, prefix=settings.API_V1_STR)
 

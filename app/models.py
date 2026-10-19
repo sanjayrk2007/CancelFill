@@ -140,6 +140,15 @@ class Slot(Base):
     holds = relationship("Hold", back_populates="slot", cascade="all, delete-orphan")
     bookings = relationship("Booking", back_populates="slot", cascade="all, delete-orphan")
 
+    @property
+    def business_name(self) -> str | None:
+        return self.owner.business_name if self.owner else None
+
+    @property
+    def category(self) -> str | None:
+        return self.owner.category if self.owner else None
+
+
 class WaitlistEntry(Base):
     __tablename__ = "waitlist_entries"
     __table_args__ = (

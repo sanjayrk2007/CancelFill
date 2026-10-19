@@ -146,8 +146,18 @@ class SlotResponse(BaseModel):
     price: Decimal
     capacity: int = 1
     status: SlotStatus
+    business_name: Optional[str] = None
+    category: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+class BusinessListItem(BaseModel):
+    id: str
+    business_name: str
+    category: str
+
+    model_config = ConfigDict(from_attributes=True)
+
 
 class WaitlistCreate(BaseModel):
     slot_id: str = Field(..., json_schema_extra={"example": "slot_uuid_123"})
