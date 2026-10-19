@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.models import PasswordResetToken, User
+from app.models import PasswordResetToken, User, Business, UserRole
 from app.security import create_access_token, hash_password, verify_password
 from app.services import notification_service
 
@@ -29,9 +29,21 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)) -> User:
         email=user_in.email,
         name=user_in.name,
         password_hash=hash_password(user_in.password),
-        role=user_in.role.value
+        role=user_in.role.value,
+        phone=user_in.phone
     )
     db.add(user)
+    db.flush()
+    if user_in.role == UserRole.BUSINESS:
+        category_val = user_in.category.value if hasattr(user_in.category, "value") else str(user_in.category)
+        business = Business(
+            user_id=user.id,
+            business_name=user_in.business_name,
+            category=category_val,
+            contact_phone=user_in.contact_phone,
+            contact_address=user_in.contact_address,
+        )
+        db.add(business)
     db.commit()
     db.refresh(user)
     return user
@@ -79,7 +91,33 @@ def update_me(
         if key in updates and updates[key] is None:
             raise HTTPException(status_code=422, detail=f"{key} cannot be null")
     if "phone" in updates:
-        updates["phone"] = updates["phone"] or None  # empty string clears the number
+        updates["phone"] = updates["phone"] or None
+
+    biz_fields = {"business_name", "category", "contact_phone", "contact_address"}
+    biz_updates = {k: updates.pop(k) for k in biz_fields if k in updates}
+    if biz_updates:
+        if current_user.role != UserRole.BUSINESS.value:
+            raise HTTPException(status_code=403, detail="Only business accounts can update business profile fields")
+        for key in ("business_name", "category", "contact_phone"):
+            if key in biz_updates and biz_updates[key] is None:
+                raise HTTPException(status_code=422, detail=f"{key} cannot be null")
+        if current_user.business_profile is None:
+            current_user.business_profile = Business(
+                user_id=current_user.id,
+                business_name=biz_updates.get("business_name") or current_user.name,
+                category=biz_updates.get("category").value if hasattr(biz_updates.get("category"), "value") else (biz_updates.get("category") or "OTHER"),
+                contact_phone=biz_updates.get("contact_phone") or (current_user.phone or ""),
+                contact_address=biz_updates.get("contact_address")
+            )
+            db.add(current_user.business_profile)
+        else:
+            for k, v in biz_updates.items():
+                if k == "category" and hasattr(v, "value"):
+                    v = v.value
+                setattr(current_user.business_profile, k, v)
+        if "contact_phone" in biz_updates and "phone" not in updates and not current_user.phone:
+            current_user.phone = biz_updates["contact_phone"]
+
     for key, value in updates.items():
         setattr(current_user, key, value)
     db.commit()

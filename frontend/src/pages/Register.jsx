@@ -4,7 +4,7 @@ import { useAuth } from '../context/useAuth';
 import { useToast } from '../context/useToast';
 import { useDocumentTitle } from '../hooks/useDocumentTitle';
 import Button from '../components/ui/Button';
-import { Mail, Lock, User, Building2, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Mail, Lock, User, Building2, CheckCircle2, ArrowRight, Phone, MapPin, Tag } from 'lucide-react';
 
 export default function Register() {
   useDocumentTitle('Create Account');
@@ -13,6 +13,12 @@ export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('CUSTOMER');
+  const [phone, setPhone] = useState('');
+  const [businessName, setBusinessName] = useState('');
+  const [category, setCategory] = useState('SALON');
+  const [contactPhone, setContactPhone] = useState('');
+  const [contactAddress, setContactAddress] = useState('');
+  const [emailAlreadyRegistered, setEmailAlreadyRegistered] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const { register } = useAuth();
@@ -21,14 +27,38 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setEmailAlreadyRegistered(false);
+
     if (!name || !email || !password) {
       error('Please complete all required fields.');
+      return;
+    }
+    if (role === 'CUSTOMER' && !phone) {
+      error('Phone number is required.');
+      return;
+    }
+    if (role === 'BUSINESS' && (!businessName || !category || !contactPhone)) {
+      error('Business name, category, and contact phone are required.');
       return;
     }
 
     setIsLoading(true);
     try {
-      const user = await register({ email, password, name, role });
+      const payload = {
+        email,
+        password,
+        name,
+        role,
+        ...(role === 'CUSTOMER'
+          ? { phone }
+          : {
+              business_name: businessName,
+              category,
+              contact_phone: contactPhone,
+              contact_address: contactAddress || null,
+            }),
+      };
+      const user = await register(payload);
       success(`Welcome to CancelFill, ${user.name}. Account created as ${role}.`);
       if (role === 'BUSINESS') {
         navigate('/business/slots', { replace: true });
@@ -36,9 +66,13 @@ export default function Register() {
         navigate('/slots', { replace: true });
       }
     } catch (err) {
-      const message =
-        err.response?.data?.detail ||
-        'Registration failed. This email may already be registered.';
+      const detail = err.response?.data?.detail;
+      const message = Array.isArray(detail)
+        ? detail[0]?.msg?.replace('Value error, ', '')
+        : (detail || 'Registration failed.');
+      if (err.response?.status === 400 && String(message).toLowerCase().includes('already registered')) {
+        setEmailAlreadyRegistered(true);
+      }
       error(message);
     } finally {
       setIsLoading(false);
@@ -48,7 +82,6 @@ export default function Register() {
   return (
     <div className="max-w-[1000px] mx-auto py-4 sm:py-8">
       <div className="bg-white border border-zinc-200 rounded-2xl shadow-sm overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[580px]">
-        {/* Left Brand Panel: 3 steps */}
         <div className="md:col-span-5 bg-zinc-900 text-zinc-100 p-8 sm:p-10 flex flex-col justify-between border-b md:border-b-0 md:border-r border-zinc-800">
           <div>
             <div className="flex items-center gap-2 mb-8">
@@ -115,7 +148,6 @@ export default function Register() {
           </div>
         </div>
 
-        {/* Right Panel: Registration Form */}
         <div className="md:col-span-7 p-8 sm:p-12 flex flex-col justify-center bg-white">
           <div className="max-w-md w-full mx-auto">
             <div className="mb-6">
@@ -127,8 +159,19 @@ export default function Register() {
               </p>
             </div>
 
+            {emailAlreadyRegistered && (
+              <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 flex items-center justify-between">
+                <span>Email already registered.</span>
+                <Link
+                  to="/login"
+                  className="font-semibold text-blue-600 hover:text-blue-700 hover:underline"
+                >
+                  Sign in here &rarr;
+                </Link>
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Role selection tabs */}
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Account Type
@@ -218,6 +261,101 @@ export default function Register() {
                   />
                 </div>
               </div>
+
+              {role === 'CUSTOMER' && (
+                <div>
+                  <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                    Phone Number
+                  </label>
+                  <div className="relative">
+                    <Phone className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="tel"
+                      required
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+15551234567"
+                      className="w-full bg-white border border-zinc-200 rounded-lg pl-9 pr-3.5 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {role === 'BUSINESS' && (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                      Business Name
+                    </label>
+                    <div className="relative">
+                      <Building2 className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        required
+                        value={businessName}
+                        onChange={(e) => setBusinessName(e.target.value)}
+                        placeholder="Acme Wellness"
+                        className="w-full bg-white border border-zinc-200 rounded-lg pl-9 pr-3.5 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                      Business Category
+                    </label>
+                    <div className="relative">
+                      <Tag className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <select
+                        required
+                        value={category}
+                        onChange={(e) => setCategory(e.target.value)}
+                        className="w-full bg-white border border-zinc-200 rounded-lg pl-9 pr-3.5 py-2 text-sm text-zinc-900 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all cursor-pointer"
+                      >
+                        <option value="SALON">Salon</option>
+                        <option value="TUTOR">Tutor</option>
+                        <option value="SPORTS">Sports</option>
+                        <option value="CLINIC">Clinic</option>
+                        <option value="SERVICE_CENTER">Service Center</option>
+                        <option value="OTHER">Other</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                      Contact Phone
+                    </label>
+                    <div className="relative">
+                      <Phone className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="tel"
+                        required
+                        value={contactPhone}
+                        onChange={(e) => setContactPhone(e.target.value)}
+                        placeholder="+15559876543"
+                        className="w-full bg-white border border-zinc-200 rounded-lg pl-9 pr-3.5 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                      Contact Address (Optional)
+                    </label>
+                    <div className="relative">
+                      <MapPin className="w-4 h-4 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={contactAddress}
+                        onChange={(e) => setContactAddress(e.target.value)}
+                        placeholder="123 Market St, Suite 400"
+                        className="w-full bg-white border border-zinc-200 rounded-lg pl-9 pr-3.5 py-2 text-sm text-zinc-900 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-transparent transition-all"
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
 
               <Button
                 type="submit"

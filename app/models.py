@@ -9,6 +9,14 @@ class UserRole(str, enum.Enum):
     CUSTOMER = "CUSTOMER"
     BUSINESS = "BUSINESS"
 
+class BusinessCategory(str, enum.Enum):
+    SALON = "SALON"
+    TUTOR = "TUTOR"
+    SPORTS = "SPORTS"
+    CLINIC = "CLINIC"
+    SERVICE_CENTER = "SERVICE_CENTER"
+    OTHER = "OTHER"
+
 class SlotStatus(str, enum.Enum):
     AVAILABLE = "AVAILABLE"
     BOOKED = "BOOKED"
@@ -74,6 +82,40 @@ class User(Base):
     notify_email = Column(Boolean, nullable=False, default=True)
     notify_sms = Column(Boolean, nullable=False, default=True)
     notify_push = Column(Boolean, nullable=False, default=True)
+
+    business_profile = relationship("Business", back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+    @property
+    def business_name(self) -> str | None:
+        return self.business_profile.business_name if self.business_profile else None
+
+    @property
+    def category(self) -> str | None:
+        return self.business_profile.category if self.business_profile else None
+
+    @property
+    def contact_phone(self) -> str | None:
+        return self.business_profile.contact_phone if self.business_profile else None
+
+    @property
+    def contact_address(self) -> str | None:
+        return self.business_profile.contact_address if self.business_profile else None
+
+class Business(Base):
+    __tablename__ = "businesses"
+    __table_args__ = (
+        CheckConstraint("category IN ('SALON', 'TUTOR', 'SPORTS', 'CLINIC', 'SERVICE_CENTER', 'OTHER')", name="ck_business_category"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
+    business_name = Column(String(255), nullable=False)
+    category = Column(String(50), nullable=False)
+    contact_phone = Column(String(32), nullable=False)
+    contact_address = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", back_populates="business_profile")
 
 class Slot(Base):
     __tablename__ = "slots"

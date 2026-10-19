@@ -10,6 +10,7 @@ DROP TABLE IF EXISTS bookings CASCADE;
 DROP TABLE IF EXISTS holds CASCADE;
 DROP TABLE IF EXISTS waitlist_entries CASCADE;
 DROP TABLE IF EXISTS slots CASCADE;
+DROP TABLE IF EXISTS businesses CASCADE;
 DROP TABLE IF EXISTS users CASCADE;
 
 CREATE TABLE users (
@@ -26,6 +27,21 @@ CREATE TABLE users (
 	PRIMARY KEY (id)
 );
 CREATE UNIQUE INDEX ix_users_email ON users (email);
+
+CREATE TABLE businesses (
+	id VARCHAR(36) NOT NULL, 
+	user_id VARCHAR(36) NOT NULL, 
+	business_name VARCHAR(255) NOT NULL, 
+	category VARCHAR(50) NOT NULL, 
+	contact_phone VARCHAR(32) NOT NULL, 
+	contact_address TEXT, 
+	created_at TIMESTAMP WITH TIME ZONE NOT NULL, 
+	PRIMARY KEY (id), 
+	UNIQUE (user_id), 
+	CONSTRAINT ck_business_category CHECK (category IN ('SALON', 'TUTOR', 'SPORTS', 'CLINIC', 'SERVICE_CENTER', 'OTHER')), 
+	FOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX ix_businesses_user_id ON businesses (user_id);
 
 CREATE TABLE slots (
 	id VARCHAR(36) NOT NULL, 

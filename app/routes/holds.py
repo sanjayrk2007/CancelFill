@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.dependencies import require_customer
+from app.dependencies import require_customer, get_current_user
 from app.models import Hold, HoldStatus, User
 from app.schemas import HoldResponse, HoldExpiryCheckResponse, BookingResponse
 from app.services.allocation_service import accept_hold, decline_hold, expire_hold
@@ -53,11 +53,15 @@ def decline_hold_endpoint(
 @router.post("/{hold_id}/check-expiry", response_model=HoldExpiryCheckResponse, summary="Check and evaluate timestamp-based hold expiry")
 def check_hold_expiry_endpoint(
     hold_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ) -> HoldExpiryCheckResponse:
     hold = db.scalars(select(Hold).where(Hold.id == hold_id)).first()
     if not hold:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Hold with id '{hold_id}' not found.")
+    slot_owner_id = hold.slot.owner_id if hold.slot else None
+    if current_user.id != hold.user_id and current_user.id != slot_owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to inspect this hold")
     now = datetime.now(timezone.utc)
     expires_at = hold.expires_at if hold.expires_at.tzinfo else hold.expires_at.replace(tzinfo=timezone.utc)
     is_expired = now > expires_at

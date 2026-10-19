@@ -187,8 +187,8 @@ export default function SlotsPage() {
             type="button"
             onClick={() => setFilter('ALL')}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${filter === 'ALL'
-                ? 'bg-white text-zinc-900 font-semibold shadow-xs'
-                : 'text-zinc-600 hover:text-zinc-900'
+              ? 'bg-white text-zinc-900 font-semibold shadow-xs'
+              : 'text-zinc-600 hover:text-zinc-900'
               }`}
           >
             All ({slots.length})
@@ -197,8 +197,8 @@ export default function SlotsPage() {
             type="button"
             onClick={() => setFilter('AVAILABLE')}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${filter === 'AVAILABLE'
-                ? 'bg-white text-zinc-900 font-semibold shadow-xs'
-                : 'text-zinc-600 hover:text-zinc-900'
+              ? 'bg-white text-zinc-900 font-semibold shadow-xs'
+              : 'text-zinc-600 hover:text-zinc-900'
               }`}
           >
             Available ({availableCount})
@@ -207,8 +207,8 @@ export default function SlotsPage() {
             type="button"
             onClick={() => setFilter('WAITLIST')}
             className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${filter === 'WAITLIST'
-                ? 'bg-white text-zinc-900 font-semibold shadow-xs'
-                : 'text-zinc-600 hover:text-zinc-900'
+              ? 'bg-white text-zinc-900 font-semibold shadow-xs'
+              : 'text-zinc-600 hover:text-zinc-900'
               }`}
           >
             Waitlist ({waitlistCount})

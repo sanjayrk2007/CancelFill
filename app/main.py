@@ -5,15 +5,20 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from app.config import settings
+from app.config import settings, DEFAULT_JWT_SECRET
 from app.database import Base, engine, get_db
 from app.routes import slots, waitlist, bookings, cancellations, holds, auth, me, business, notifications, payments
 from app.services.scheduler import start_scheduler, stop_scheduler
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    if settings.JWT_SECRET == DEFAULT_JWT_SECRET and not settings.DATABASE_URL.lower().startswith("sqlite"):
+        logger.warning(
+            "SECURITY WARNING: JWT_SECRET is set to the default development key in a non-sqlite environment. Set a secure JWT_SECRET in production!"
+        )
     Base.metadata.create_all(bind=engine)
     start_scheduler()
     try:

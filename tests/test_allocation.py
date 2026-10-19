@@ -20,6 +20,7 @@ from app.services.state_machine import (
     assert_transition,
     InvalidTransition,
 )
+from app.services.allocation_service import join_waitlist
 from tests.invariants import assert_invariants
 
 def test_state_machine_slot_transitions() -> None:
@@ -224,6 +225,7 @@ def test_direct_booking_booked_slot_returns_409_and_preserves_booking(
 def test_accept_after_expiry_cascades_to_next_candidate(
     client: TestClient,
     db: Session,
+    customer_user_2: User,
     business_auth_headers: Dict[str, str],
     customer_auth_headers: Dict[str, str],
     customer_2_auth_headers: Dict[str, str],
@@ -245,16 +247,8 @@ def test_accept_after_expiry_cascades_to_next_candidate(
 
     client.post("/api/v1/bookings", json={"slot_id": slot_id}, headers=customer_auth_headers)
 
-    client.post(
-        "/api/v1/waitlist",
-        json={"slot_id": slot_id, "joined_at": (now - timedelta(minutes=10)).isoformat()},
-        headers=customer_2_auth_headers
-    )
-    client.post(
-        "/api/v1/waitlist",
-        json={"slot_id": slot_id, "joined_at": (now - timedelta(minutes=5)).isoformat()},
-        headers=other_customer_auth_headers
-    )
+    join_waitlist(db=db, slot_id=slot_id, user_id=customer_user_2.id, joined_at=now - timedelta(minutes=10))
+    join_waitlist(db=db, slot_id=slot_id, user_id=other_customer_user.id, joined_at=now - timedelta(minutes=5))
 
     booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
     booking_id = booking.id
@@ -285,6 +279,7 @@ def test_accept_after_expiry_cascades_to_next_candidate(
 def test_decline_cascades(
     client: TestClient,
     db: Session,
+    customer_user_2: User,
     business_auth_headers: Dict[str, str],
     customer_auth_headers: Dict[str, str],
     customer_2_auth_headers: Dict[str, str],
@@ -306,16 +301,8 @@ def test_decline_cascades(
 
     client.post("/api/v1/bookings", json={"slot_id": slot_id}, headers=customer_auth_headers)
 
-    client.post(
-        "/api/v1/waitlist",
-        json={"slot_id": slot_id, "joined_at": (now - timedelta(minutes=10)).isoformat()},
-        headers=customer_2_auth_headers
-    )
-    client.post(
-        "/api/v1/waitlist",
-        json={"slot_id": slot_id, "joined_at": (now - timedelta(minutes=5)).isoformat()},
-        headers=other_customer_auth_headers
-    )
+    join_waitlist(db=db, slot_id=slot_id, user_id=customer_user_2.id, joined_at=now - timedelta(minutes=10))
+    join_waitlist(db=db, slot_id=slot_id, user_id=other_customer_user.id, joined_at=now - timedelta(minutes=5))
 
     booking = db.query(Booking).filter(Booking.slot_id == slot_id, Booking.status == BookingStatus.CONFIRMED.value).one()
     booking_id = booking.id
@@ -419,7 +406,8 @@ def test_full_cycle_api(
     customer_auth_headers: Dict[str, str],
     customer_2_auth_headers: Dict[str, str],
     other_customer_auth_headers: Dict[str, str],
-    customer_user_2: User
+    customer_user_2: User,
+    other_customer_user: User
 ) -> None:
     now = datetime.now(timezone.utc)
 
@@ -429,7 +417,8 @@ def test_full_cycle_api(
             "email": "cust4@example.com",
             "name": "Customer Four",
             "password": "password123",
-            "role": "CUSTOMER"
+            "role": "CUSTOMER",
+            "phone": "+919876543214"
         }
     )
     login_res = client.post(
@@ -461,26 +450,10 @@ def test_full_cycle_api(
     first_booking_id = book_res.json()["id"]
     assert book_res.json()["source"] == "DIRECT"
 
-    w1 = client.post(
-        "/api/v1/waitlist",
-        json={"slot_id": slot_id, "joined_at": (now - timedelta(minutes=30)).isoformat()},
-        headers=customer_2_auth_headers
-    )
-    assert w1.status_code == 201
-
-    w2 = client.post(
-        "/api/v1/waitlist",
-        json={"slot_id": slot_id, "joined_at": (now - timedelta(minutes=20)).isoformat()},
-        headers=other_customer_auth_headers
-    )
-    assert w2.status_code == 201
-
-    w3 = client.post(
-        "/api/v1/waitlist",
-        json={"slot_id": slot_id, "joined_at": (now - timedelta(minutes=10)).isoformat()},
-        headers=cust4_headers
-    )
-    assert w3.status_code == 201
+    cust4_user = db.query(User).filter(User.email == "cust4@example.com").one()
+    join_waitlist(db=db, slot_id=slot_id, user_id=customer_user_2.id, joined_at=now - timedelta(minutes=30))
+    join_waitlist(db=db, slot_id=slot_id, user_id=other_customer_user.id, joined_at=now - timedelta(minutes=20))
+    join_waitlist(db=db, slot_id=slot_id, user_id=cust4_user.id, joined_at=now - timedelta(minutes=10))
 
     cancel_res = client.post(
         f"/api/v1/bookings/{first_booking_id}/cancel",

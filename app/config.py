@@ -1,5 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_JWT_SECRET: str = "dev-secret-key-change-in-production"
+
 class Settings(BaseSettings):
     PROJECT_NAME: str = "CancelFill – Intelligent Cancellation Recovery & Waitlist Platform"
     VERSION: str = "0.1.0 (Review-1)"
@@ -8,7 +10,7 @@ class Settings(BaseSettings):
     DEFAULT_HOLD_DURATION_SECONDS: int = 900
     SCHEDULER_ENABLED: bool = True
     SCHEDULER_INTERVAL_SECONDS: int = 15
-    JWT_SECRET: str = "dev-secret-key-change-in-production"
+    JWT_SECRET: str = DEFAULT_JWT_SECRET
     JWT_EXPIRE_MINUTES: int = 60
     CORS_ORIGINS: str = "http://localhost:5173"
     FRONTEND_URL: str = "http://localhost:5173"

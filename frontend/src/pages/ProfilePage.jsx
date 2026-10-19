@@ -31,13 +31,18 @@ export default function ProfilePage() {
   const [nameValue, setNameValue] = useState(user?.name || '');
   const [nameLoading, setNameLoading] = useState(false);
 
+  const [bizName, setBizName] = useState(user?.business_name || '');
+  const [bizCategory, setBizCategory] = useState(user?.category || 'SALON');
+  const [bizPhone, setBizPhone] = useState(user?.contact_phone || '');
+  const [bizAddress, setBizAddress] = useState(user?.contact_address || '');
+  const [bizLoading, setBizLoading] = useState(false);
+
   const [currentPw, setCurrentPw] = useState('');
   const [newPw, setNewPw] = useState('');
   const [confirmPw, setConfirmPw] = useState('');
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState('');
 
-  // Notification preferences
   const [phone, setPhone] = useState(user?.phone || '');
   const [prefs, setPrefs] = useState({
     notify_email: user?.notify_email ?? true,
@@ -53,6 +58,17 @@ export default function ProfilePage() {
     getPushConfig().then(setPushConfig).catch(() => {});
     currentSubscription().then((sub) => setPushOn(Boolean(sub))).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      setNameValue(user.name || '');
+      setPhone(user.phone || '');
+      setBizName(user.business_name || '');
+      setBizCategory(user.category || 'SALON');
+      setBizPhone(user.contact_phone || '');
+      setBizAddress(user.contact_address || '');
+    }
+  }, [user]);
 
   const handlePrefsSave = async (e) => {
     e.preventDefault();
@@ -105,6 +121,31 @@ export default function ProfilePage() {
     }
   };
 
+  const handleBusinessSave = async (e) => {
+    e.preventDefault();
+    if (!bizName.trim() || !bizCategory || !bizPhone.trim()) {
+      toastError('Business name, category, and contact phone are required.');
+      return;
+    }
+    setBizLoading(true);
+    try {
+      const res = await client.patch('/api/v1/auth/me', {
+        business_name: bizName.trim(),
+        category: bizCategory,
+        contact_phone: bizPhone.trim(),
+        contact_address: bizAddress.trim() || null,
+      });
+      updateUser(res.data);
+      success('Business profile updated.');
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      const msg = Array.isArray(detail) ? detail[0]?.msg?.replace('Value error, ', '') : detail;
+      toastError(msg || 'Failed to update business profile.');
+    } finally {
+      setBizLoading(false);
+    }
+  };
+
   const handlePasswordChange = async (e) => {
     e.preventDefault();
     setPwError('');
@@ -138,7 +179,6 @@ export default function ProfilePage() {
 
   return (
     <div className="max-w-lg space-y-8">
-      {/* Page header */}
       <div>
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">Profile</h1>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
@@ -146,18 +186,26 @@ export default function ProfilePage() {
         </p>
       </div>
 
-      {/* Identity card */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5">
         <div className="flex items-center gap-4">
           <Avatar name={user.name} size="lg" />
           <div>
             <div className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{user.name}</div>
             <div className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{user.email}</div>
-            <div className="mt-2">
+            <div className="mt-2 flex items-center gap-2">
               <Badge status={role} size="sm" />
+              {role === 'BUSINESS' && user.category && (
+                <Badge status={user.category} size="sm" />
+              )}
             </div>
           </div>
         </div>
+        {role === 'BUSINESS' && user.business_name && (
+          <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800 text-xs">
+            <span className="text-zinc-500 dark:text-zinc-400">Business Name</span>
+            <div className="font-medium text-zinc-900 dark:text-zinc-100 mt-0.5">{user.business_name}</div>
+          </div>
+        )}
         <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800 grid grid-cols-2 gap-3 text-xs">
           <div>
             <span className="text-zinc-500 dark:text-zinc-400">Account ID</span>
@@ -172,7 +220,6 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Update name */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4">Display name</h2>
         <form onSubmit={handleNameSave} className="space-y-4">
@@ -201,7 +248,72 @@ export default function ProfilePage() {
         </form>
       </div>
 
-      {/* Notifications */}
+      {role === 'BUSINESS' && (
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1">Business profile</h2>
+          <p className="text-xs text-zinc-500 mb-4">
+            Update your business identity, public category, and direct contact details.
+          </p>
+          <form onSubmit={handleBusinessSave} className="space-y-4">
+            <Field label="Business name" htmlFor="biz-name">
+              <input
+                id="biz-name"
+                type="text"
+                className={inputCls}
+                value={bizName}
+                onChange={(e) => setBizName(e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Category" htmlFor="biz-category">
+              <select
+                id="biz-category"
+                className={inputCls}
+                value={bizCategory}
+                onChange={(e) => setBizCategory(e.target.value)}
+                required
+              >
+                <option value="SALON">Salon</option>
+                <option value="TUTOR">Tutor</option>
+                <option value="SPORTS">Sports</option>
+                <option value="CLINIC">Clinic</option>
+                <option value="SERVICE_CENTER">Service Center</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </Field>
+            <Field label="Contact phone" htmlFor="biz-phone">
+              <input
+                id="biz-phone"
+                type="tel"
+                className={inputCls}
+                value={bizPhone}
+                onChange={(e) => setBizPhone(e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Contact address (optional)" htmlFor="biz-address">
+              <input
+                id="biz-address"
+                type="text"
+                className={inputCls}
+                value={bizAddress}
+                onChange={(e) => setBizAddress(e.target.value)}
+              />
+            </Field>
+            <div className="flex justify-end">
+              <Button
+                type="submit"
+                variant="primary"
+                size="sm"
+                disabled={bizLoading}
+              >
+                {bizLoading ? 'Saving…' : 'Save business profile'}
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-1">Notifications</h2>
         <p className="text-xs text-zinc-500 mb-4">
@@ -275,7 +387,6 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Change password */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5">
         <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4">Change password</h2>
         <form onSubmit={handlePasswordChange} className="space-y-4">

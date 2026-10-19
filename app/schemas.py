@@ -1,14 +1,48 @@
+import re
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from app.models import SlotStatus, WaitlistStatus, HoldStatus, BookingStatus, BookingSource, UserRole, PaymentStatus
+from app.models import (
+    SlotStatus, WaitlistStatus, HoldStatus, BookingStatus, BookingSource, UserRole, PaymentStatus, BusinessCategory
+)
+
+def _clean_and_validate_phone(v: Optional[str], field_name: str) -> str:
+    if not v or not v.strip():
+        raise ValueError(f"{field_name} is required")
+    cleaned = v.strip()
+    digits = re.sub(r"\D", "", cleaned)
+    if not (10 <= len(digits) <= 15) or not re.fullmatch(r"\+?[1-9]\d{9,14}", cleaned):
+        raise ValueError(f"{field_name} must be a valid phone number with 10-15 digits, e.g. +919876543210")
+    if not cleaned.startswith("+"):
+        cleaned = "+" + cleaned
+    return cleaned
 
 class UserRegister(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
     email: str = Field(..., json_schema_extra={"example": "user@example.com"})
     password: str = Field(..., json_schema_extra={"example": "password123"})
     name: str = Field(..., json_schema_extra={"example": "Alice"})
     role: UserRole = Field(default=UserRole.CUSTOMER, json_schema_extra={"example": "CUSTOMER"})
+    phone: Optional[str] = None
+    business_name: Optional[str] = None
+    category: Optional[BusinessCategory] = None
+    contact_phone: Optional[str] = None
+    contact_address: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _validate_role_fields(self) -> "UserRegister":
+        if self.role == UserRole.CUSTOMER:
+            self.phone = _clean_and_validate_phone(self.phone, "Phone")
+        elif self.role == UserRole.BUSINESS:
+            if not self.business_name or not self.business_name.strip():
+                raise ValueError("Business name is required for business registration")
+            if not self.category:
+                raise ValueError("Business category is required for business registration")
+            self.contact_phone = _clean_and_validate_phone(self.contact_phone, "Contact phone")
+            if not self.phone and self.contact_phone:
+                self.phone = self.contact_phone
+        return self
 
 class UserLogin(BaseModel):
     email: str = Field(..., json_schema_extra={"example": "user@example.com"})
@@ -28,6 +62,10 @@ class UserResponse(BaseModel):
     notify_email: bool = True
     notify_sms: bool = True
     notify_push: bool = True
+    business_name: Optional[str] = None
+    category: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_address: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -38,16 +76,20 @@ class UserUpdate(BaseModel):
     notify_email: Optional[bool] = None
     notify_sms: Optional[bool] = None
     notify_push: Optional[bool] = None
+    business_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    category: Optional[BusinessCategory] = None
+    contact_phone: Optional[str] = Field(default=None, max_length=32)
+    contact_address: Optional[str] = None
 
-    @field_validator("phone")
+    @field_validator("phone", "contact_phone")
     @classmethod
     def _valid_phone(cls, v: Optional[str]) -> Optional[str]:
         if v is None or v == "":
             return v
-        import re
-        if not re.fullmatch(r"\+[1-9]\d{7,14}", v):
+        cleaned = v.strip()
+        if not re.fullmatch(r"\+[1-9]\d{7,14}", cleaned):
             raise ValueError("Phone must be in international format, e.g. +919876543210")
-        return v
+        return cleaned
 
 class ForgotPasswordRequest(BaseModel):
     email: str
@@ -109,7 +151,6 @@ class SlotResponse(BaseModel):
 
 class WaitlistCreate(BaseModel):
     slot_id: str = Field(..., json_schema_extra={"example": "slot_uuid_123"})
-    joined_at: Optional[datetime] = Field(None, json_schema_extra={"example": "2026-09-01T09:00:00Z"})
 
 class WaitlistResponse(BaseModel):
     id: str

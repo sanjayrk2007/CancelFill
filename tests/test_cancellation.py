@@ -3,11 +3,13 @@ from typing import Dict
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 from app.models import Slot, User
+from app.services.allocation_service import join_waitlist
 
 def test_cancellation_candidate_selection_flow(
     client: TestClient,
     db: Session,
     customer_user: User,
+    customer_user_2: User,
     business_auth_headers: Dict[str, str],
     customer_auth_headers: Dict[str, str],
     customer_2_auth_headers: Dict[str, str],
@@ -37,22 +39,8 @@ def test_cancellation_candidate_selection_flow(
     assert booking_res.status_code == 201
     booking_id = booking_res.json()["id"]
 
-    client.post(
-        "/api/v1/waitlist",
-        json={
-            "slot_id": slot_id,
-            "joined_at": (now - timedelta(minutes=20)).isoformat()
-        },
-        headers=customer_auth_headers
-    )
-    client.post(
-        "/api/v1/waitlist",
-        json={
-            "slot_id": slot_id,
-            "joined_at": (now - timedelta(minutes=10)).isoformat()
-        },
-        headers=customer_2_auth_headers
-    )
+    join_waitlist(db=db, slot_id=slot_id, user_id=customer_user.id, joined_at=now - timedelta(minutes=20))
+    join_waitlist(db=db, slot_id=slot_id, user_id=customer_user_2.id, joined_at=now - timedelta(minutes=10))
 
     res_no_auth = client.post(f"/api/v1/bookings/{booking_id}/cancel")
     assert res_no_auth.status_code == 401

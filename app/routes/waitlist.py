@@ -19,8 +19,7 @@ def add_to_waitlist(
         return join_waitlist(
             db=db,
             slot_id=entry_in.slot_id,
-            user_id=current_user.id,
-            joined_at=entry_in.joined_at
+            user_id=current_user.id
         )
     except NotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

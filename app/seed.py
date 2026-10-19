@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from app.database import SessionLocal, Base, engine
-from app.models import Slot, SlotStatus, WaitlistEntry, WaitlistStatus, Booking, BookingStatus, User, UserRole
+from app.models import Slot, SlotStatus, WaitlistEntry, WaitlistStatus, Booking, BookingStatus, User, UserRole, Business, BusinessCategory
 from app.security import hash_password
 
 def seed_database() -> None:
@@ -19,6 +19,16 @@ def seed_database() -> None:
             name="Dr. Smith",
             password_hash=pwd_hash,
             role=UserRole.BUSINESS.value,
+            phone="+919876543210",
+            created_at=now - timedelta(days=1)
+        )
+        biz_profile = Business(
+            id="biz-profile-1",
+            user_id=biz_user.id,
+            business_name="Dr. Smith Medical Clinic",
+            category=BusinessCategory.CLINIC.value,
+            contact_phone="+919876543210",
+            contact_address="123 Health Ave, Suite 400",
             created_at=now - timedelta(days=1)
         )
         cust_alice = User(
@@ -27,6 +37,7 @@ def seed_database() -> None:
             name="Alice",
             password_hash=pwd_hash,
             role=UserRole.CUSTOMER.value,
+            phone="+919876543211",
             created_at=now - timedelta(days=1)
         )
         cust_bob = User(
@@ -35,6 +46,7 @@ def seed_database() -> None:
             name="Bob",
             password_hash=pwd_hash,
             role=UserRole.CUSTOMER.value,
+            phone="+919876543212",
             created_at=now - timedelta(days=1)
         )
         cust_charlie = User(
@@ -43,10 +55,11 @@ def seed_database() -> None:
             name="Charlie",
             password_hash=pwd_hash,
             role=UserRole.CUSTOMER.value,
+            phone="+919876543213",
             created_at=now - timedelta(days=1)
         )
 
-        db.add_all([biz_user, cust_alice, cust_bob, cust_charlie])
+        db.add_all([biz_user, biz_profile, cust_alice, cust_bob, cust_charlie])
         db.commit()
 
         slot1 = Slot(
